@@ -1717,19 +1717,20 @@ public partial class MainForm : Form
         string profileName = CurrentConfig.ProfileName;
 
         // Dropping someone's tunnel on a stray click is exactly the kind of thing
-        // that must never happen silently, so: confirm first, defaulting to No.
-        DialogResult answer = MessageBox.Show(
+        // that must never happen silently, so: confirm first, defaulting to
+        // Cancel. Styled (ConfirmDialog) rather than a plain MessageBox - the
+        // rest of the app already left generic system chrome behind.
+        bool confirmed = ConfirmDialog.Show(
             this,
-            $"Disconnect the VPN profile \"{profileName}\"?\r\n\r\n" +
-            "Auto-reconnect will be switched OFF first - otherwise this watchdog would " +
-            "see the drop and bring the tunnel straight back up.\r\n\r\n" +
-            "You can re-arm it whenever you like with the Auto-reconnect checkbox.",
-            "Disconnect VPN",
-            MessageBoxButtons.YesNo,
-            MessageBoxIcon.Warning,
-            MessageBoxDefaultButton.Button2);
+            title: "Disconnect VPN",
+            heading: $"Disconnect the VPN profile \"{profileName}\"?",
+            message: "Auto-reconnect will be switched OFF first - otherwise this watchdog would " +
+                "see the drop and bring the tunnel straight back up.\n\n" +
+                "You can re-arm it whenever you like with the Auto-reconnect checkbox.",
+            confirmText: "Disconnect",
+            cancelText: "Cancel");
 
-        if (answer != DialogResult.Yes) return;
+        if (!confirmed) return;
 
         // Disarm BEFORE disconnecting, never after. Assigning Checked raises
         // ChkAutoReconnect_CheckedChanged, which rebuilds ReconnectPolicy from a
