@@ -662,16 +662,16 @@ public sealed class ActivityLogForm : Form
     {
         if (_clearInFlight) return;
 
-        // Destructive and irreversible, so: confirm first, defaulting to No.
-        DialogResult answer = MessageBox.Show(
+        // Destructive and irreversible, so: confirm first, defaulting to Cancel.
+        bool confirmed = ConfirmDialog.Show(
             this,
-            "Delete all recorded VPN events? This cannot be undone.",
-            "Clear Logs",
-            MessageBoxButtons.YesNo,
-            MessageBoxIcon.Warning,
-            MessageBoxDefaultButton.Button2);
+            title: "Clear Logs",
+            heading: "Delete all recorded VPN events?",
+            message: "This cannot be undone.",
+            confirmText: "Clear Logs",
+            cancelText: "Cancel");
 
-        if (answer != DialogResult.Yes) return;
+        if (!confirmed) return;
 
         _clearInFlight = true;
         _btnClear.Enabled = false;
