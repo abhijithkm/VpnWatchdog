@@ -256,6 +256,9 @@ partial class MainForm
         btnSettings.Anchor = AnchorStyles.Right;
         btnSettings.Margin = new Padding(0);
         btnSettings.Cursor = Cursors.Hand;
+        // Text is a decorative glyph codepoint, not a word - without this a
+        // screen reader announces the raw glyph instead of what the button does.
+        btnSettings.AccessibleName = "Settings";
         toolTip.SetToolTip(btnSettings, "Settings");
         btnSettings.Click += BtnSettings_Click;
 

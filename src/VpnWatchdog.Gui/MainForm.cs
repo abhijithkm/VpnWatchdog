@@ -164,6 +164,15 @@ public partial class MainForm : Form
     private bool _suppressCheckboxEvents;
     private bool _exitRequested;
 
+    // Same size/family as lblHeroSub's own designer-assigned font, but
+    // underlined - the hero sub-line's only clickable state (the profile-
+    // mismatch nudge) had no non-color affordance at all before this: a
+    // colorblind user, or anyone not hovering it, had no way to tell it was a
+    // link rather than ordinary status text. Never disposed, matching every
+    // other Font field InitializeComponent creates for the form's lifetime.
+    private static readonly Font HeroSubUnderlineFont = new("Segoe UI", 8.5F, FontStyle.Underline, GraphicsUnit.Point);
+    private static readonly Font HeroSubRegularFont = new("Segoe UI", 8.5F, FontStyle.Regular, GraphicsUnit.Point);
+
     // Set by BeginUpdateCheck; read only by RenderVersionLabel and
     // LblVersion_Click. Independent of monitoring/VPN state entirely - this is
     // "is a newer release of this app itself available", nothing to do with the
@@ -1080,6 +1089,7 @@ public partial class MainForm : Form
         lblHeroProfile.Text = _config.ProfileName;
         lblHeroSub.Text = sub;
         lblHeroSub.ForeColor = subColour;
+        lblHeroSub.Font = subIsClickable ? HeroSubUnderlineFont : HeroSubRegularFont;
         lblHeroSub.Cursor = subIsClickable ? Cursors.Hand : Cursors.Default;
         toolTip.SetToolTip(lblHeroSub, subIsClickable
             ? "FortiClient does not know this profile name. Open Settings and set the profile name to one of yours."
@@ -2382,7 +2392,15 @@ public partial class MainForm : Form
 
         public static readonly Color Green = Color.FromArgb(0x10, 0x7C, 0x10);
         public static readonly Color Red = Color.FromArgb(0xC4, 0x2B, 0x1C);
-        public static readonly Color Amber = Color.FromArgb(0xC1, 0x9C, 0x00);
+        // Darker than a typical "amber" swatch on purpose: the original
+        // 0xC19C00 measured 2.3-2.4:1 against this app's own tint/idle
+        // backgrounds (WCAG requires 4.5:1 for normal text) - confirmed via a
+        // GUI audit, this is the color of the one message on screen the user
+        // is told to act on ("click to fix"), so illegible was a real defect,
+        // not a nitpick. This shade measures 5.3-5.6:1 against every
+        // background it can appear on in this app (Grey/Amber/Red/Green/Blue
+        // tint) while staying recognizably gold/amber, not brown.
+        public static readonly Color Amber = Color.FromArgb(0x7A, 0x5F, 0x00);
         public static readonly Color Blue = Color.FromArgb(0x00, 0x67, 0xC0);
 
         public static readonly Color GreenTint = Color.FromArgb(0xEA, 0xF6, 0xEA);
