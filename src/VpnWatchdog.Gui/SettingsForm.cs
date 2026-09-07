@@ -35,6 +35,7 @@ public sealed class SettingsForm : Form
     private readonly NumericUpDown nudPollInterval = Spinner(GuiSettingLimits.MinPollIntervalMs, GuiSettingLimits.MaxPollIntervalMs, increment: 500);
     private readonly CheckBox chkStartOnLaunch = Toggle("Start monitoring on launch");
     private readonly CheckBox chkMinimizeToTray = Toggle("Minimize to tray on close");
+    private readonly CheckBox chkAutoStartWithWindows = Toggle("Start VPN Watchdog when Windows starts");
 
     private readonly CheckBox chkAutoReconnect = Toggle("Auto-reconnect");
     private readonly NumericUpDown nudGracePeriod = Spinner(GuiSettingLimits.MinGracePeriodSeconds, GuiSettingLimits.MaxGracePeriodSeconds, increment: 5);
@@ -149,6 +150,12 @@ public sealed class SettingsForm : Form
         toolTip.SetToolTip(chkMinimizeToTray, "Closing the window hides it in the tray instead of exiting.");
         row = NewRow(layout);
         Place(layout, chkMinimizeToTray, 0, row, span: ColumnCount);
+
+        toolTip.SetToolTip(chkAutoStartWithWindows,
+            "Launch this app when you log into Windows (combine with \"Start monitoring\n" +
+            "on launch\" above for a watchdog that is fully unattended across a reboot).");
+        row = NewRow(layout);
+        Place(layout, chkAutoStartWithWindows, 0, row, span: ColumnCount);
 
         // ---- Auto-reconnect --------------------------------------------------
 
@@ -277,6 +284,7 @@ public sealed class SettingsForm : Form
         SetValue(nudPollInterval, settings.PollIntervalMs);
         chkStartOnLaunch.Checked = settings.StartMonitoringOnLaunch;
         chkMinimizeToTray.Checked = settings.MinimizeToTrayOnClose;
+        chkAutoStartWithWindows.Checked = settings.AutoStartWithWindows;
 
         chkAutoReconnect.Checked = settings.AutoReconnectEnabled;
         SetValue(nudGracePeriod, settings.ReconnectGracePeriodSeconds);
@@ -312,6 +320,7 @@ public sealed class SettingsForm : Form
         _result.PollIntervalMs = (int)nudPollInterval.Value;
         _result.StartMonitoringOnLaunch = chkStartOnLaunch.Checked;
         _result.MinimizeToTrayOnClose = chkMinimizeToTray.Checked;
+        _result.AutoStartWithWindows = chkAutoStartWithWindows.Checked;
 
         // The checkbox is the one and only source of this value.
         _result.AutoReconnectEnabled = chkAutoReconnect.Checked;

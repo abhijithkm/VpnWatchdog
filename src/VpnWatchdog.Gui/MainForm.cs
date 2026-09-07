@@ -156,6 +156,14 @@ public partial class MainForm : Form
         _config = _settings.ToWatchdogConfig();
         _activityLog = CreateActivityLog(_config);
 
+        // Re-applied on every launch, not just when the checkbox changes: this is
+        // what self-heals a stale Run-key entry if the exe was moved/reinstalled
+        // to a new path since it was last set.
+        if (_settings.AutoStartWithWindows)
+        {
+            WindowsStartupRegistration.Enable();
+        }
+
         pollTimer.Interval = Math.Max(MinPollIntervalMs, _config.PollIntervalMs);
 
         // Reflect the saved switch without recording it: nothing has changed yet,
@@ -497,6 +505,15 @@ public partial class MainForm : Form
         _settings.Save();
         _config = _settings.ToWatchdogConfig();
         pollTimer.Interval = Math.Max(MinPollIntervalMs, _config.PollIntervalMs);
+
+        if (_settings.AutoStartWithWindows)
+        {
+            WindowsStartupRegistration.Enable();
+        }
+        else
+        {
+            WindowsStartupRegistration.Disable();
+        }
 
         // The checkbox is the live source of truth for CurrentConfig, so it is
         // synced BEFORE any restart below builds a policy from it. Changing it via
@@ -1243,6 +1260,13 @@ public partial class MainForm : Form
         {
             RecordActivity(VpnActivityKind.AutoReconnectGaveUp, "Auto-reconnect gave up",
                 $"after {policy.AttemptCount} attempt(s)");
+
+            // The one moment this app most needs to reach someone who is not
+            // looking at the screen: every automated attempt is exhausted and the
+            // tunnel is still down. A balloon tip works even while minimized to
+            // tray, which is the whole point of a "watchdog" - see
+            // ShowGaveUpNotification for why this never throws into the poll loop.
+            ShowGaveUpNotification(policy.AttemptCount);
         }
 
         _lastReconnectDecision = decision;
@@ -1260,6 +1284,33 @@ public partial class MainForm : Form
         if (decision == ReconnectDecision.Triggered && !_reconnectInFlight && policy.BeginAttempt())
         {
             StartReconnectAttempt(policy, controller);
+        }
+    }
+
+    /// <summary>
+    /// A Windows notification-area balloon for the one moment this app most needs
+    /// to reach someone who is not looking at the screen: every automated attempt
+    /// is exhausted and the tunnel is still down. Deliberately does not force the
+    /// tray icon visible to show this - <see cref="NotifyIcon.ShowBalloonTip"/>
+    /// only has anywhere to anchor a balloon while the icon is already showing
+    /// (i.e. the window is minimized to tray), which is exactly the case where a
+    /// balloon is useful; when the window is open on-screen, the hero sub-line
+    /// already says "Gave up after N attempts" and a balloon would be redundant.
+    /// </summary>
+    private void ShowGaveUpNotification(int attemptCount)
+    {
+        try
+        {
+            trayIcon.BalloonTipIcon = ToolTipIcon.Warning;
+            trayIcon.BalloonTipTitle = "VPN Watchdog";
+            trayIcon.BalloonTipText =
+                $"Gave up reconnecting '{_config.ProfileName}' after {attemptCount} attempt(s). " +
+                "The tunnel is still down - try FortiClient's own tray icon to reconnect manually.";
+            trayIcon.ShowBalloonTip(10_000);
+        }
+        catch
+        {
+            // A failed notification must never be worth taking down the poll loop.
         }
     }
 

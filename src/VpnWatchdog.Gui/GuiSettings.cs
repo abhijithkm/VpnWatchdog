@@ -49,6 +49,16 @@ public sealed class GuiSettings
     public bool MinimizeToTrayOnClose { get; set; }
 
     /// <summary>
+    /// Whether this app should launch itself when the user logs into Windows (a
+    /// per-user Registry Run-key entry - see <see cref="WindowsStartupRegistration"/>).
+    /// Separate from <see cref="StartMonitoringOnLaunch"/>: this is "does the app
+    /// itself open", that is "once it opens, does it start watching immediately" -
+    /// together they are what makes the watchdog genuinely unattended across a
+    /// reboot, but each is independently useful without the other.
+    /// </summary>
+    public bool AutoStartWithWindows { get; set; }
+
+    /// <summary>
     /// Built-in defaults, taken from <see cref="WatchdogConfig.Default"/> so the GUI and
     /// the CLI start from the same numbers.
     /// </summary>
@@ -74,6 +84,11 @@ public sealed class GuiSettings
         // settings file: Start is a click, and closing the window exits.
         StartMonitoringOnLaunch = false;
         MinimizeToTrayOnClose = false;
+
+        // Off by default like every other opt-in switch in this app: writing a
+        // Registry Run-key entry the moment someone runs the exe for the first
+        // time, without being asked, would be a surprise no one wants.
+        AutoStartWithWindows = false;
     }
 
     /// <summary>
@@ -123,6 +138,7 @@ public sealed class GuiSettings
         settings.PollIntervalMs = stored.PollIntervalMs ?? settings.PollIntervalMs;
         settings.StartMonitoringOnLaunch = stored.StartMonitoringOnLaunch ?? settings.StartMonitoringOnLaunch;
         settings.MinimizeToTrayOnClose = stored.MinimizeToTrayOnClose ?? settings.MinimizeToTrayOnClose;
+        settings.AutoStartWithWindows = stored.AutoStartWithWindows ?? settings.AutoStartWithWindows;
 
         settings.Clamp();
         return settings;
@@ -237,6 +253,7 @@ public sealed class GuiSettings
         public int? PollIntervalMs { get; set; }
         public bool? StartMonitoringOnLaunch { get; set; }
         public bool? MinimizeToTrayOnClose { get; set; }
+        public bool? AutoStartWithWindows { get; set; }
     }
 }
 
