@@ -2,6 +2,7 @@ using System.Linq;
 using System.Text;
 using VpnWatchdog.Core;
 using VpnWatchdog.Core.Correlation;
+using VpnWatchdog.Core.Diagnostics;
 using VpnWatchdog.Core.Logging;
 using VpnWatchdog.Core.Providers;
 using VpnWatchdog.Core.Reconnect;
@@ -169,6 +170,7 @@ public static class Program
         IFortiClientLogMonitor logMonitor = new FortiClientLogMonitor(config.FortiClientLogDirectory, config.ProfileName);
         IVpnEventCorrelator correlator = new VpnEventCorrelator(config.ProfileName, config.OpenCorrelationTimeoutMinutes);
         IVpnEventStore store = new SqliteVpnEventStore(config.DatabasePath);
+        var throughputTracker = new NetworkThroughputTracker();
 
         // The human-readable trail of what happened and what we did. Deliberately a
         // SEPARATE store from the monitoring database above, at a fixed shared path, so
@@ -438,6 +440,11 @@ public static class Program
                     InternetSnapshot internetSnapshot = await internetProvider.GetCurrentStateAsync(ct);
                     IReadOnlyList<ProcessSnapshot> processSnapshots = await processProvider.GetProcessesAsync(ct);
 
+                    // null (not a fabricated zero) until there are two trustworthy
+                    // samples - see NetworkThroughputTracker for the guarantees.
+                    ThroughputSample? throughput =
+                        throughputTracker.Update(adapterSnapshot.BytesReceived, adapterSnapshot.BytesSent, now);
+
                     // Drain everything currently available from the log monitor for this tick
                     // only - it is expected to yield the new lines since the last tracked byte
                     // offset and then complete, not to block waiting for future lines.
@@ -625,7 +632,10 @@ public static class Program
                         }
                     }
 
-                    dashboard.Render(config, vpnStateSnapshot, internetSnapshot, processSnapshots, correlator, now, updateNotice);
+                    dashboard.Render(
+                        config, vpnStateSnapshot, internetSnapshot, processSnapshots, correlator, now,
+                        throughput: throughput,
+                        updateNotice: updateNotice);
 
                     // The dashboard clears the screen on its first render, which would wipe the
                     // startup banner within a couple of seconds; restate the one-line mode

@@ -3,6 +3,7 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using VpnWatchdog.Core;
 using VpnWatchdog.Core.Correlation;
+using VpnWatchdog.Core.Diagnostics;
 using VpnWatchdog.Core.Logging;
 using VpnWatchdog.Core.Providers;
 using VpnWatchdog.Core.Reconnect;
@@ -31,6 +32,7 @@ public partial class MainForm : Form
     private const int MinPollIntervalMs = 500;
 
     private const string NoUptime = "--:--:--";
+    private const string NoThroughput = "↓ -- ↑ --";
 
     // FortiClient's VPN engine processes. Either one running is what "FortiClient
     // is running" means here; FortiTray/FortiSettings are UI and prove nothing
@@ -46,6 +48,7 @@ public partial class MainForm : Form
     private IFortiClientLogMonitor? _logMonitor;
     private IVpnEventCorrelator? _correlator;
     private IVpnEventStore? _store;
+    private NetworkThroughputTracker? _throughputTracker;
 
     private IReconnectController? _reconnectController;
     private ReconnectPolicy? _reconnectPolicy;
@@ -282,6 +285,7 @@ public partial class MainForm : Form
             _logMonitor = new FortiClientLogMonitor(_config.FortiClientLogDirectory, _config.ProfileName);
             _correlator = new VpnEventCorrelator(_config.ProfileName, _config.OpenCorrelationTimeoutMinutes);
             _store = new SqliteVpnEventStore(_config.DatabasePath);
+            _throughputTracker = new NetworkThroughputTracker();
 
             // Reconnect side. The controller can only ever ask FortiClient to CONNECT;
             // the policy decides whether asking is allowed right now, and stays fully
@@ -300,6 +304,7 @@ public partial class MainForm : Form
             _logMonitor = null;
             _correlator = null;
             _store = null;
+            _throughputTracker = null;
             DisposeReconnect();
 
             MessageBox.Show(this,
@@ -358,6 +363,7 @@ public partial class MainForm : Form
         _logMonitor = null;
         _correlator = null;
         _store = null;
+        _throughputTracker = null;
 
         RecordActivity(VpnActivityKind.MonitoringStopped, "Monitoring stopped", detail);
 
@@ -655,7 +661,12 @@ public partial class MainForm : Form
 
             bool fortiRunning = IsFortiClientRunning(processes, out string runningEngines);
 
-            RenderState(snapshot, internet, processes, runningEngines, fortiRunning, now);
+            // Independent of everything else observed this tick: the tracker just
+            // wants the adapter's raw byte counters and "now", and returns null
+            // (never a fabricated zero) until it has two trustworthy samples.
+            ThroughputSample? throughput = _throughputTracker?.Update(adapter.BytesReceived, adapter.BytesSent, now);
+
+            RenderState(snapshot, internet, processes, runningEngines, fortiRunning, throughput, now);
             RecordObservedTransitions(snapshot.State, internet.State, fortiRunning, runningEngines, recovery);
 
             // Reconnect decision comes last, so it can layer its own status on top
@@ -699,6 +710,7 @@ public partial class MainForm : Form
         IReadOnlyList<ProcessSnapshot> processes,
         string runningEngines,
         bool fortiRunning,
+        ThroughputSample? throughput,
         DateTimeOffset now)
     {
         _shownState = snapshot.State;
@@ -755,6 +767,24 @@ public partial class MainForm : Form
         lblFortiExtra.Text = runningEngines;
         toolTip.SetToolTip(lblFortiValue, DescribeProcesses(processes));
 
+        // Network throughput. null (not a zero) means "not enough samples yet" -
+        // shown as the same placeholder as before monitoring started, rather than
+        // a momentarily-misleading "0 B/s" on the very first tick after Start.
+        if (throughput is { } rate)
+        {
+            lblNetworkValue.Text = $"↓ {FormatRate(rate.DownloadBytesPerSecond)} ↑ {FormatRate(rate.UploadBytesPerSecond)}";
+            lblNetworkExtra.Text = $"{FormatBytes(rate.TotalBytesReceived)} ↓ / {FormatBytes(rate.TotalBytesSent)} ↑ total";
+            toolTip.SetToolTip(lblNetworkValue,
+                "Live send/receive rate on the VPN adapter. \"total\" is the adapter's\n" +
+                "own cumulative counter from Windows, which may not start from zero\n" +
+                "when this monitoring session started - it is not reset by this app.");
+        }
+        else
+        {
+            lblNetworkValue.Text = NoThroughput;
+            lblNetworkExtra.Text = string.Empty;
+        }
+
         // Uptime is the correlator's view of how long Connected has held, not the
         // adapter's - the two agree, and the correlator's is what the log uses.
         lblUptimeValue.Text = snapshot.State == VpnState.Connected && _correlator is not null
@@ -777,6 +807,10 @@ public partial class MainForm : Form
         toolTip.SetToolTip(lblInternetValue, "Start monitoring to observe the internet connection.");
         toolTip.SetToolTip(lblAdapterValue, "Start monitoring to observe the VPN adapter.");
         toolTip.SetToolTip(lblFortiValue, "Start monitoring to observe FortiClient's processes.");
+
+        lblNetworkValue.Text = NoThroughput;
+        lblNetworkExtra.Text = string.Empty;
+        toolTip.SetToolTip(lblNetworkValue, "Start monitoring to observe network throughput.");
 
         lblUptimeValue.Text = NoUptime;
 
@@ -969,6 +1003,28 @@ public partial class MainForm : Form
         ts.TotalHours >= 100
             ? $"{(int)ts.TotalHours}:{ts.Minutes:00}:{ts.Seconds:00}"
             : $"{(int)ts.TotalHours:00}:{ts.Minutes:00}:{ts.Seconds:00}";
+
+    private static readonly string[] ByteUnits = { "B", "KB", "MB", "GB", "TB" };
+
+    /// <summary>"1.2 MB/s" style, auto-scaled. A negative input (should not happen -
+    /// the tracker guards against it - but a format helper must never throw over
+    /// a defensive Math.Max(0, ...) elsewhere going slightly wrong) clamps to 0.</summary>
+    private static string FormatRate(double bytesPerSecond) => $"{FormatBytes(bytesPerSecond)}/s";
+
+    private static string FormatBytes(double bytes)
+    {
+        double value = Math.Max(0, bytes);
+        int unit = 0;
+        while (value >= 1024 && unit < ByteUnits.Length - 1)
+        {
+            value /= 1024;
+            unit++;
+        }
+
+        // Whole units read as whole numbers ("12 B/s", not "12.0 B/s"); anything
+        // scaled up gets one decimal place, which is all a live rate needs.
+        return unit == 0 ? $"{value:0} {ByteUnits[unit]}" : $"{value:0.0} {ByteUnits[unit]}";
+    }
 
     private static string VersionText()
     {

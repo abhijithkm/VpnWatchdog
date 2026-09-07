@@ -135,6 +135,21 @@ public sealed class AdapterConnectionStateProvider : IConnectionStateProvider
             }
         }
 
+        long? bytesReceived = null;
+        long? bytesSent = null;
+        try
+        {
+            IPInterfaceStatistics stats = nic.GetIPStatistics();
+            bytesReceived = stats.BytesReceived;
+            bytesSent = stats.BytesSent;
+        }
+        catch
+        {
+            // Not every adapter/driver supports interface statistics - leave both
+            // null rather than reporting a fabricated zero, so a consumer can tell
+            // "no data yet" apart from "genuinely zero bytes so far".
+        }
+
         return new AdapterSnapshot(
             AdapterFound: true,
             AdapterName: nic.Name,
@@ -144,6 +159,8 @@ public sealed class AdapterConnectionStateProvider : IConnectionStateProvider
             IpAddress: ipAddress,
             PrefixLength: prefixLength,
             GatewayAddresses: gatewayAddresses,
-            ObservedAt: observedAt);
+            ObservedAt: observedAt,
+            BytesReceived: bytesReceived,
+            BytesSent: bytesSent);
     }
 }

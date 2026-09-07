@@ -122,6 +122,10 @@ The policy also defends against two real-world clock problems: a **laptop suspen
 
 Because a manual disconnect while auto-reconnect is armed would otherwise have the watchdog immediately bring the tunnel right back up, both the GUI and CLI **disarm auto-reconnect first**, visibly, before disconnecting — and the GUI confirms with the user (defaulting to *No*) before doing it at all.
 
+### Network throughput
+
+Both apps show a live send/receive rate for the VPN adapter (e.g. `↓ 1.2 MB/s ↑ 340 KB/s`) alongside the adapter's own cumulative totals since it was last (re)created. This is read straight off Windows' own interface counters (`NetworkInterface.GetIPStatistics`) every poll tick — nothing is actively downloaded or uploaded to measure it, so it reflects real traffic on the adapter, not a synthetic bandwidth test. `NetworkThroughputTracker` (Core) turns two consecutive counter readings into a rate, and is careful about the ways that can go wrong: a fresh monitoring session, a momentarily unreadable adapter, or the counters going backwards (the adapter was very likely recreated, e.g. by a reconnect) all correctly show "not enough information yet" rather than a fabricated or negative number.
+
 ### The activity log
 
 A shared, human-readable trail — separate from the raw evidence database — recording things like "VPN Connected", "Auto-reconnect triggered", "Manual disconnect requested", each with a timestamp, message, and optional detail. It lives at **`%LOCALAPPDATA%\VpnWatchdog\activity-log.db`** by default, a fixed path so the GUI and CLI both append to and read from the same one history. It's capped (default 5000 entries, pruned lazily) and its `Record()` call is guaranteed to never throw — a failure to write a log line must never be able to take down monitoring or a reconnect attempt.

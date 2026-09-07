@@ -1,5 +1,6 @@
 using System.Linq;
 using VpnWatchdog.Core;
+using VpnWatchdog.Core.Diagnostics;
 
 namespace VpnWatchdog.Cli;
 
@@ -17,6 +18,11 @@ public sealed class ConsoleDashboard
     private string? _lastRenderedSignature;
     private DateTimeOffset _lastRenderTime = DateTimeOffset.MinValue;
 
+    /// <param name="throughput">
+    /// The live send/receive rate on the VPN adapter, or null if there are not yet
+    /// two trustworthy samples to compute one from (just started, or the adapter
+    /// was recently recreated) - see <see cref="NetworkThroughputTracker"/>.
+    /// </param>
     /// <param name="updateNotice">
     /// A one-line "a newer version is available" notice (already fully worded, URL
     /// included), or null if none is known yet / the running version is current.
@@ -31,6 +37,7 @@ public sealed class ConsoleDashboard
         IReadOnlyList<ProcessSnapshot> processes,
         IVpnEventCorrelator correlator,
         DateTimeOffset now,
+        ThroughputSample? throughput = null,
         string? updateNotice = null)
     {
         IReadOnlyList<DisconnectCorrelation> completed = correlator.GetCompletedCorrelations();
@@ -106,6 +113,10 @@ public sealed class ConsoleDashboard
         PrintField("Internet:", internet.State.ToString());
         PrintField("FortiVPN:", fortiVpnRunning ? "RUNNING" : "NOT RUNNING");
         PrintField("SSLVPN daemon:", sslVpnDaemonRunning ? "RUNNING" : "NOT RUNNING");
+        PrintField("Network:", throughput is { } rate
+            ? $"down {FormatRate(rate.DownloadBytesPerSecond)}, up {FormatRate(rate.UploadBytesPerSecond)} " +
+              $"(total: {FormatBytes(rate.TotalBytesReceived)} down / {FormatBytes(rate.TotalBytesSent)} up)"
+            : "(measuring...)");
         PrintField("Current state duration:", durationDisplay);
         Console.WriteLine();
         Console.WriteLine("Events this session:");
@@ -153,5 +164,22 @@ public sealed class ConsoleDashboard
     {
         int totalHours = (int)duration.TotalHours;
         return $"{totalHours:00}:{duration.Minutes:00}:{duration.Seconds:00}";
+    }
+
+    private static readonly string[] ByteUnits = { "B", "KB", "MB", "GB", "TB" };
+
+    private static string FormatRate(double bytesPerSecond) => $"{FormatBytes(bytesPerSecond)}/s";
+
+    private static string FormatBytes(double bytes)
+    {
+        double value = Math.Max(0, bytes);
+        int unit = 0;
+        while (value >= 1024 && unit < ByteUnits.Length - 1)
+        {
+            value /= 1024;
+            unit++;
+        }
+
+        return unit == 0 ? $"{value:0} {ByteUnits[unit]}" : $"{value:0.0} {ByteUnits[unit]}";
     }
 }

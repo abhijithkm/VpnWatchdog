@@ -44,6 +44,9 @@ partial class MainForm
     private Label lblFortiCaption;
     private Label lblFortiValue;
     private Label lblFortiExtra;
+    private Label lblNetworkCaption;
+    private Label lblNetworkValue;
+    private Label lblNetworkExtra;
     private Panel sepStatus;
     private Label lblUptimeCaption;
     private Label lblUptimeValue;
@@ -115,6 +118,9 @@ partial class MainForm
         lblFortiCaption = new Label();
         lblFortiValue = new Label();
         lblFortiExtra = new Label();
+        lblNetworkCaption = new Label();
+        lblNetworkValue = new Label();
+        lblNetworkExtra = new Label();
         sepStatus = MakeSeparator();
         lblUptimeCaption = new Label();
         lblUptimeValue = new Label();
@@ -343,8 +349,8 @@ partial class MainForm
         statusLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         statusLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         statusLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        statusLayout.RowCount = 7;
-        for (int i = 0; i < 7; i++)
+        statusLayout.RowCount = 8;
+        for (int i = 0; i < 8; i++)
         {
             statusLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         }
@@ -364,6 +370,18 @@ partial class MainForm
         StyleCaption(lblFortiCaption, "FortiClient", bodyFont, captionMargin);
         StyleValue(lblFortiValue, bodyFont, rowMargin);
         StyleExtra(lblFortiExtra, smallFont, extraMargin);
+
+        StyleCaption(lblNetworkCaption, "Network", bodyFont, captionMargin);
+        // Not StyleValue: that sets the "○ Unknown" dot-status convention used
+        // by the boolean Up/Down/Running rows above. This row is a live number,
+        // not a status - same plain-text treatment as lblUptimeValue below.
+        lblNetworkValue.Text = NoThroughput;
+        lblNetworkValue.Font = bodyFont;
+        lblNetworkValue.ForeColor = Palette.Text;
+        lblNetworkValue.AutoSize = true;
+        lblNetworkValue.Anchor = AnchorStyles.Left;
+        lblNetworkValue.Margin = rowMargin;
+        StyleExtra(lblNetworkExtra, smallFont, extraMargin);
 
         StyleCaption(lblUptimeCaption, "VPN Uptime", bodyFont, captionMargin);
         lblUptimeValue.Text = "--:--:--";
@@ -400,14 +418,17 @@ partial class MainForm
         statusLayout.Controls.Add(lblFortiCaption, 0, 2);
         statusLayout.Controls.Add(lblFortiValue, 1, 2);
         statusLayout.Controls.Add(lblFortiExtra, 2, 2);
-        statusLayout.Controls.Add(sepStatus, 0, 3);
+        statusLayout.Controls.Add(lblNetworkCaption, 0, 3);
+        statusLayout.Controls.Add(lblNetworkValue, 1, 3);
+        statusLayout.Controls.Add(lblNetworkExtra, 2, 3);
+        statusLayout.Controls.Add(sepStatus, 0, 4);
         statusLayout.SetColumnSpan(sepStatus, 3);
-        statusLayout.Controls.Add(lblUptimeCaption, 0, 4);
-        statusLayout.Controls.Add(lblUptimeValue, 1, 4);
-        statusLayout.Controls.Add(lblLastEventCaption, 0, 5);
-        statusLayout.Controls.Add(lblLastEventValue, 1, 5);
+        statusLayout.Controls.Add(lblUptimeCaption, 0, 5);
+        statusLayout.Controls.Add(lblUptimeValue, 1, 5);
+        statusLayout.Controls.Add(lblLastEventCaption, 0, 6);
+        statusLayout.Controls.Add(lblLastEventValue, 1, 6);
         statusLayout.SetColumnSpan(lblLastEventValue, 2);
-        statusLayout.Controls.Add(lblLastEventTime, 1, 6);
+        statusLayout.Controls.Add(lblLastEventTime, 1, 7);
         statusLayout.SetColumnSpan(lblLastEventTime, 2);
 
         // ------------------------------------------------------------------

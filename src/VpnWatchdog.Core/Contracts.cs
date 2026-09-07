@@ -67,7 +67,17 @@ public sealed record AdapterSnapshot(
     string? IpAddress,
     int? PrefixLength,
     IReadOnlyList<string> GatewayAddresses,
-    DateTimeOffset ObservedAt)
+    DateTimeOffset ObservedAt,
+    // Cumulative totals straight from the OS (NetworkInterface.GetIPStatistics).
+    // Not verified against this specific adapter's actual reconnect behaviour,
+    // but interface counters are generally understood to reset if Windows
+    // reinitializes the underlying adapter instance - which is exactly why
+    // these are raw counters rather than a rate: turning a counter into a rate
+    // needs two samples and an elapsed time, and
+    // that is a stateful computation a snapshot provider has no business doing.
+    // See NetworkThroughputTracker for that half.
+    long? BytesReceived = null,
+    long? BytesSent = null)
 {
     public static AdapterSnapshot NotFound(DateTimeOffset observedAt) =>
         new(false, null, null, null, false, null, null, Array.Empty<string>(), observedAt);
