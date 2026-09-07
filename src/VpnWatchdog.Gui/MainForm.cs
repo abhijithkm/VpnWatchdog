@@ -50,6 +50,13 @@ public partial class MainForm : Form
     private IVpnEventStore? _store;
     private NetworkThroughputTracker? _throughputTracker;
 
+    // Evidence-store persistence gating - a row per tick would be ~43,000 rows a
+    // day, forever, for a table nothing reads; matches the CLI's own change-or-
+    // heartbeat gating. Reset on every StartMonitoring so a fresh session never
+    // inherits a stale "last persisted" baseline from an earlier one.
+    private VpnState? _lastPersistedState;
+    private DateTimeOffset _lastSnapshotPersistedAt = DateTimeOffset.MinValue;
+
     private IReconnectController? _reconnectController;
     private ReconnectPolicy? _reconnectPolicy;
     private CancellationTokenSource? _reconnectCts;
@@ -62,6 +69,33 @@ public partial class MainForm : Form
     // RunOnUiThread before touching them.
     private bool _reconnectInFlight;
     private int _reconnectAttemptNumber;
+
+    // Set when the auto-reconnect checkbox changes while an attempt is in
+    // flight - the policy swap that would make it take effect is deferred to
+    // the next EvaluateReconnect once the in-flight attempt has ended, rather
+    // than applied immediately. Swapping _reconnectPolicy under a live attempt
+    // would hand its EndAttempt()/RecordAttemptResult() to a single-flight
+    // latch different from the one it started on, silently resetting the
+    // attempt budget and backoff for that outage - the same hazard the CLI's
+    // "do not simplify either guard away" comment documents for its own
+    // policy swap.
+    private bool _reconnectPolicyRebuildPending;
+
+    // FortiClient COM automation being genuinely UNAVAILABLE (no COM server to
+    // talk to at all) is distinct from an attempt that was made and failed, and
+    // is handled distinctly - matching the CLI's own "DEFECT 2" fix. Without
+    // this, a machine where FortiClient's service simply hasn't started yet
+    // (a real race at boot, exactly when "start monitoring on launch" +
+    // "auto-start with Windows" are both on) burns the whole attempt budget in
+    // under 10 minutes and then gives up on that outage permanently, with no
+    // automatic recovery even once FortiClient does come up. Instead: pause
+    // (skip evaluating reconnect entirely) and periodically re-probe with a
+    // cheap read-only COM call; re-arm automatically the moment it answers.
+    private bool _reconnectComUnavailable;
+    private DateTimeOffset _nextComReprobeAt;
+    private bool _comReprobeInFlight;
+    private static readonly TimeSpan ComReprobeInterval = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan ComReprobeTimeout = TimeSpan.FromSeconds(10);
     private ReconnectDecision _lastReconnectDecision = ReconnectDecision.DisabledByUser;
 
     // Bumped on every Start/Stop so a reconnect attempt left over from a previous
@@ -136,7 +170,16 @@ public partial class MainForm : Form
     // tunnel.
     private string? _updateAvailableVersionTag;
     private string? _updateReleaseUrl;
-    private bool _updateCheckInFlight;
+
+    // volatile, and reset unconditionally in BeginUpdateCheck's finally rather
+    // than inside the RunOnUiThread callback: BeginUpdateCheck runs from the
+    // constructor, before Application.Run creates the window handle, and
+    // RunOnUiThread silently no-ops while !IsHandleCreated. A background check
+    // that completes (or fails fast - e.g. an immediate DNS failure while
+    // offline) before the handle exists would otherwise leave this stuck true
+    // forever, permanently wedging both the periodic re-check timer and a
+    // manual retry with no error, no crash, and nothing to show for it.
+    private volatile bool _updateCheckInFlight;
 
     /// <summary>
     /// The base config with the live checkbox state folded in. AutoReconnectEnabled
@@ -294,6 +337,8 @@ public partial class MainForm : Form
             _correlator = new VpnEventCorrelator(_config.ProfileName, _config.OpenCorrelationTimeoutMinutes);
             _store = new SqliteVpnEventStore(_config.DatabasePath);
             _throughputTracker = new NetworkThroughputTracker();
+            _lastPersistedState = null;
+            _lastSnapshotPersistedAt = DateTimeOffset.MinValue;
 
             // Reconnect side. The controller can only ever ask FortiClient to CONNECT;
             // the policy decides whether asking is allowed right now, and stays fully
@@ -311,6 +356,7 @@ public partial class MainForm : Form
             _processProvider = null;
             _logMonitor = null;
             _correlator = null;
+            try { (_store as IDisposable)?.Dispose(); } catch { /* best effort */ }
             _store = null;
             _throughputTracker = null;
             DisposeReconnect();
@@ -322,6 +368,9 @@ public partial class MainForm : Form
         }
 
         _reconnectInFlight = false;
+        _reconnectPolicyRebuildPending = false;
+        _reconnectComUnavailable = false;
+        _comReprobeInFlight = false;
         _reconnectAttemptNumber = 0;
         _lastReconnectDecision = ReconnectDecision.DisabledByUser;
         _reconnectGeneration++;
@@ -362,14 +411,17 @@ public partial class MainForm : Form
         _monitoring = false;
 
         // Provider/correlator instances are cheap and stateless enough to just
-        // drop and recreate on the next Start - no explicit disposal needed
-        // (SqliteVpnEventStore opens/closes a connection per call, nothing to
-        // leak by discarding the reference).
+        // drop and recreate on the next Start - no explicit disposal needed.
+        // The store is the one exception: SqliteVpnEventStore opens/closes a
+        // connection per call, but Microsoft.Data.Sqlite's pool still holds
+        // native file handles open for as long as the process runs unless
+        // told to release them - see SqliteVpnEventStore.Dispose.
         _adapterProvider = null;
         _internetProvider = null;
         _processProvider = null;
         _logMonitor = null;
         _correlator = null;
+        try { (_store as IDisposable)?.Dispose(); } catch { /* best effort, same as the activity log */ }
         _store = null;
         _throughputTracker = null;
 
@@ -407,6 +459,9 @@ public partial class MainForm : Form
 
         _reconnectPolicy = null;
         _reconnectInFlight = false;
+        _reconnectPolicyRebuildPending = false;
+        _reconnectComUnavailable = false;
+        _comReprobeInFlight = false;
         _reconnectAttemptNumber = 0;
         _lastReconnectDecision = ReconnectDecision.DisabledByUser;
 
@@ -598,14 +653,20 @@ public partial class MainForm : Form
         if (!_monitoring) return;
 
         // AutoReconnectEnabled lives on an immutable record, so the policy is
-        // rebuilt from a fresh config to make the new checkbox state take effect
-        // on the very next poll rather than at the next Start.
-        _reconnectPolicy = new ReconnectPolicy(CurrentConfig);
-
+        // rebuilt from a fresh config to make the new checkbox state take
+        // effect. Only safe to do while no attempt is in flight - see
+        // _reconnectPolicyRebuildPending's doc comment. If one is in flight,
+        // defer: EvaluateReconnect applies the rebuild itself on the first
+        // tick after the attempt ends.
         if (!_reconnectInFlight)
         {
+            _reconnectPolicy = new ReconnectPolicy(CurrentConfig);
             _reconnectAttemptNumber = 0;
             _lastReconnectDecision = ReconnectDecision.DisabledByUser;
+        }
+        else
+        {
+            _reconnectPolicyRebuildPending = true;
         }
 
         RenderHero();
@@ -649,30 +710,16 @@ public partial class MainForm : Form
             DisconnectCorrelation? openAfter = _correlator.GetOpenCorrelation();
             IReadOnlyList<DisconnectCorrelation> completedAfter = _correlator.GetCompletedCorrelations();
 
-            await _store.SaveVpnStateSnapshotAsync(snapshot, CancellationToken.None);
-            foreach (LogEvent logEvent in newLogEvents)
-            {
-                await _store.SaveLogEventAsync(logEvent, CancellationToken.None);
-            }
-
-            bool openedNew = openAfter is not null && (openBefore is null || openBefore.CorrelationId != openAfter.CorrelationId);
-            if (openedNew)
-            {
-                await _store.UpsertCorrelationAsync(openAfter!, CancellationToken.None);
-            }
-
             // A correlation that closed THIS tick as recovered carries the
-            // evidence-based disconnect->connected duration for the log line.
+            // evidence-based disconnect->connected duration for the log line. A
+            // pure read of what the correlator already decided - independent of
+            // whether persisting it to the store below succeeds.
             TimeSpan? recovery = null;
-            if (completedAfter.Count > completedBefore)
+            for (int i = completedBefore; i < completedAfter.Count; i++)
             {
-                for (int i = completedBefore; i < completedAfter.Count; i++)
+                if (completedAfter[i].RecoverySucceeded == true && completedAfter[i].RecoveryDuration is TimeSpan recovered)
                 {
-                    await _store.UpsertCorrelationAsync(completedAfter[i], CancellationToken.None);
-                    if (completedAfter[i].RecoverySucceeded == true && completedAfter[i].RecoveryDuration is TimeSpan recovered)
-                    {
-                        recovery = recovered;
-                    }
+                    recovery = recovered;
                 }
             }
 
@@ -683,6 +730,10 @@ public partial class MainForm : Form
             // (never a fabricated zero) until it has two trustworthy samples.
             ThroughputSample? throughput = _throughputTracker?.Update(adapter.BytesReceived, adapter.BytesSent, now);
 
+            // Observation and the reconnect decision must land on screen and take
+            // effect regardless of whether the evidence store can be written to -
+            // see PersistTickEvidenceAsync's own doc comment for why persistence
+            // runs AFTER this and can never block it.
             RenderState(snapshot, internet, processes, runningEngines, fortiRunning, throughput, now);
             RecordObservedTransitions(snapshot.State, internet.State, fortiRunning, runningEngines, recovery);
 
@@ -690,6 +741,8 @@ public partial class MainForm : Form
             // of the freshly rendered state without ever delaying observation.
             EvaluateReconnect(snapshot.State, internet.State, now);
             RenderHero();
+
+            await PersistTickEvidenceAsync(snapshot, newLogEvents, openBefore, openAfter, completedBefore, completedAfter, now);
         }
         catch
         {
@@ -699,6 +752,64 @@ public partial class MainForm : Form
         finally
         {
             _pollInFlight = false;
+        }
+    }
+
+    /// <summary>
+    /// Best-effort persistence of this tick's evidence to the GUI's own SQLite
+    /// store. Deliberately isolated behind its own try/catch and run AFTER
+    /// rendering and the reconnect decision: a store outage (an unwritable path,
+    /// a full disk, a locked file) must degrade to "no history is being
+    /// recorded", never to a hero card frozen on this tick forever or - far more
+    /// serious - to auto-reconnect silently never being evaluated again, because
+    /// every future tick keeps throwing from the very first store call before
+    /// ever reaching <see cref="EvaluateReconnect"/>.
+    /// </summary>
+    private async Task PersistTickEvidenceAsync(
+        VpnStateSnapshot snapshot,
+        List<LogEvent> newLogEvents,
+        DisconnectCorrelation? openBefore,
+        DisconnectCorrelation? openAfter,
+        int completedBefore,
+        IReadOnlyList<DisconnectCorrelation> completedAfter,
+        DateTimeOffset now)
+    {
+        if (_store is not { } store) return;
+
+        try
+        {
+            // Persisted on a CHANGE, plus a heartbeat - never on every tick. A
+            // row per tick is ~43,000 rows a day, growing for as long as the
+            // process runs, for a table nothing reads; matches the CLI's own
+            // gating exactly.
+            TimeSpan heartbeat = TimeSpan.FromMilliseconds(Math.Max(_config.PollIntervalMs, _config.HeartbeatIntervalMs));
+            if (_lastPersistedState != snapshot.State || now - _lastSnapshotPersistedAt >= heartbeat)
+            {
+                await store.SaveVpnStateSnapshotAsync(snapshot, CancellationToken.None);
+                _lastPersistedState = snapshot.State;
+                _lastSnapshotPersistedAt = now;
+            }
+
+            foreach (LogEvent logEvent in newLogEvents)
+            {
+                await store.SaveLogEventAsync(logEvent, CancellationToken.None);
+            }
+
+            bool openedNew = openAfter is not null && (openBefore is null || openBefore.CorrelationId != openAfter.CorrelationId);
+            if (openedNew)
+            {
+                await store.UpsertCorrelationAsync(openAfter!, CancellationToken.None);
+            }
+
+            for (int i = completedBefore; i < completedAfter.Count; i++)
+            {
+                await store.UpsertCorrelationAsync(completedAfter[i], CancellationToken.None);
+            }
+        }
+        catch
+        {
+            // Losing this tick's history is a nuisance, never worth taking the
+            // rest of the app down with it - see the doc comment above.
         }
     }
 
@@ -987,6 +1098,13 @@ public partial class MainForm : Form
     /// </summary>
     private string? ReconnectSubStatus(bool recovering)
     {
+        if (_reconnectComUnavailable)
+        {
+            return _comReprobeInFlight
+                ? "Checking if FortiClient is ready..."
+                : "Auto-reconnect paused - FortiClient COM automation unavailable";
+        }
+
         if (_reconnectInFlight)
         {
             return $"Reconnecting... (attempt {_reconnectAttemptNumber})";
@@ -1098,10 +1216,12 @@ public partial class MainForm : Form
             }
             finally
             {
+                // Unconditional, and outside the UI-thread marshal below on
+                // purpose - see _updateCheckInFlight's doc comment for why.
+                _updateCheckInFlight = false;
+
                 RunOnUiThread(() =>
                 {
-                    _updateCheckInFlight = false;
-
                     // Only a genuine change is worth a repaint - the far more common
                     // case, "still up to date", must stay a total no-op.
                     if (_updateAvailableVersionTag != tag || _updateReleaseUrl != url)
@@ -1266,9 +1386,33 @@ public partial class MainForm : Form
 
     private void EvaluateReconnect(VpnState vpnState, InternetState internetState, DateTimeOffset now)
     {
+        // Apply a checkbox change that arrived mid-attempt, now that the attempt
+        // has ended - see _reconnectPolicyRebuildPending's doc comment.
+        if (_reconnectPolicyRebuildPending && !_reconnectInFlight)
+        {
+            _reconnectPolicyRebuildPending = false;
+            _reconnectPolicy = new ReconnectPolicy(CurrentConfig);
+            _reconnectAttemptNumber = 0;
+            _lastReconnectDecision = ReconnectDecision.DisabledByUser;
+        }
+
         ReconnectPolicy? policy = _reconnectPolicy;
         IReconnectController? controller = _reconnectController;
         if (policy is null || controller is null) return;
+
+        // Paused: FortiClient COM automation was found genuinely unavailable by a
+        // previous attempt. Skip evaluating (and therefore triggering) reconnects
+        // entirely until either the re-probe interval elapses (try again) or the
+        // re-probe is already running (wait for it) - see BeginComReprobe.
+        if (_reconnectComUnavailable)
+        {
+            if (!_comReprobeInFlight && now >= _nextComReprobeAt)
+            {
+                BeginComReprobe(controller);
+            }
+
+            return;
+        }
 
         ReconnectDecision decision = policy.Evaluate(vpnState, internetState, now);
 
@@ -1304,6 +1448,64 @@ public partial class MainForm : Form
         {
             StartReconnectAttempt(policy, controller);
         }
+    }
+
+    /// <summary>
+    /// Cheap, read-only check of whether FortiClient's COM server is answering
+    /// again, run off the poll loop exactly like a reconnect attempt. Reuses
+    /// GetTunnelListAsync rather than a real Connect - this only needs to know
+    /// COM is alive, not to touch the tunnel. Bounded by <see cref="ComReprobeTimeout"/>
+    /// so a COM server that hangs instead of erroring cannot wedge this forever.
+    /// </summary>
+    private void BeginComReprobe(IReconnectController controller)
+    {
+        _comReprobeInFlight = true;
+        int generation = _reconnectGeneration;
+        CancellationToken ct = _reconnectCts?.Token ?? CancellationToken.None;
+
+        _ = Task.Run(async () =>
+        {
+            bool available = false;
+            try
+            {
+                await controller.GetTunnelListAsync(ct).WaitAsync(ComReprobeTimeout, ct).ConfigureAwait(false);
+                available = true;
+            }
+            catch
+            {
+                // Still unavailable (or the call timed out, or monitoring is
+                // shutting down) - all treated the same: try again next interval.
+                // No activity-log line here on purpose: this repeats every few
+                // minutes for as long as FortiClient stays away, and the downgrade
+                // it is retrying was already announced loudly, once.
+            }
+
+            RunOnUiThread(() =>
+            {
+                // Ignore results from a monitoring session that has since stopped.
+                if (generation != _reconnectGeneration) return;
+
+                _comReprobeInFlight = false;
+
+                if (available)
+                {
+                    _reconnectComUnavailable = false;
+                    _reconnectPolicy = new ReconnectPolicy(CurrentConfig);
+                    _reconnectAttemptNumber = 0;
+                    _lastReconnectDecision = ReconnectDecision.DisabledByUser;
+
+                    RecordActivity(VpnActivityKind.AutoReconnectArmed, "Auto-reconnect re-armed",
+                        "FortiClient COM automation is answering again");
+                    SetNotice("Auto-reconnect re-armed - FortiClient is responding again", Palette.Green);
+                }
+                else
+                {
+                    _nextComReprobeAt = DateTimeOffset.Now + ComReprobeInterval;
+                }
+
+                RenderHero();
+            });
+        });
     }
 
     /// <summary>
@@ -1357,11 +1559,25 @@ public partial class MainForm : Form
         _ = Task.Run(async () =>
         {
             bool succeeded = false;
+            bool comUnavailable = false;
             Exception? failure = null;
             try
             {
                 await controller.ReconnectAsync(profileName, ct).ConfigureAwait(false);
                 succeeded = true;
+            }
+            catch (FortiClientComUnavailableException ex)
+            {
+                // Genuinely unavailable (no COM server to talk to at all), as
+                // opposed to an attempt that was made and failed - the controller
+                // draws that line. Still counts against the policy's own attempt
+                // budget below like any other failure (matching the CLI exactly),
+                // but the UI callback additionally pauses further attempts and
+                // schedules a re-probe instead of just retrying at the normal
+                // backoff cadence against a COM server that is not there.
+                succeeded = false;
+                failure = ex;
+                comUnavailable = true;
             }
             catch (Exception ex)
             {
@@ -1395,6 +1611,13 @@ public partial class MainForm : Form
                             : $"attempt {attemptNumber}: {failure?.Message ?? "no reason reported"}");
                 }
 
+                if (comUnavailable)
+                {
+                    RecordActivity(VpnActivityKind.AutoReconnectDisarmed, "Auto-reconnect paused",
+                        $"FortiClient COM automation is unavailable ({failure?.Message}); " +
+                        $"will re-check every {ComReprobeInterval.TotalMinutes:0} minutes");
+                }
+
                 RunOnUiThread(() =>
                 {
                     // Ignore results from a monitoring session that has since stopped.
@@ -1408,6 +1631,12 @@ public partial class MainForm : Form
                     {
                         _reconnectAttemptNumber = 0;
                         SetNotice($"Reconnected automatically (attempt {attemptNumber})", Palette.Green);
+                    }
+
+                    if (comUnavailable)
+                    {
+                        _reconnectComUnavailable = true;
+                        _nextComReprobeAt = DateTimeOffset.Now + ComReprobeInterval;
                     }
 
                     _lastReconnectDecision = succeeded
@@ -2050,7 +2279,13 @@ public partial class MainForm : Form
 
     protected override void WndProc(ref Message m)
     {
-        if (m.Msg == ShowExistingInstanceMessage)
+        // != 0 guard: RegisterWindowMessage returns 0 on the (very rare)
+        // failure case, and 0 is WM_NULL - a real message other software can
+        // legitimately send (e.g. as a hung-window liveness probe). Without
+        // this, a failed registration would make this window pop out of the
+        // tray every time ANY app on the system sends a WM_NULL, not just
+        // when a second instance of this one launches.
+        if (ShowExistingInstanceMessage != 0 && m.Msg == ShowExistingInstanceMessage)
         {
             RestoreFromTray();
         }

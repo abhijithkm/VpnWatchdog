@@ -198,8 +198,33 @@ public sealed class GuiSettings
 
             // Separate DB file from the CLI's, so both can run at the same time
             // without any SQLite write contention.
-            DatabasePath = "vpn-watchdog-gui.db",
+            DatabasePath = ResolveDatabasePath(),
         };
+    }
+
+    /// <summary>
+    /// An ABSOLUTE path next to this exe - never a bare relative filename. SQLite
+    /// resolves a relative "Data Source" against the process's CURRENT WORKING
+    /// DIRECTORY, not its executable's folder, and those two are only the same
+    /// by coincidence. A process launched from the HKCU Run key (see
+    /// <see cref="WindowsStartupRegistration"/>) starts with its working
+    /// directory set to <c>C:\Windows\System32</c>, where a standard user cannot
+    /// create a file - so a bare relative path here would make the evidence
+    /// store fail to open on every single tick, forever, on exactly the
+    /// "auto-start with Windows" configuration this app exists to support.
+    /// Resolved via <see cref="Environment.ProcessPath"/> - unlike
+    /// <c>Assembly.Location</c>, this reports the real exe path even for a
+    /// single-file-published build - matching the same resolution
+    /// <see cref="WindowsStartupRegistration.Enable"/> already relies on.
+    /// </summary>
+    private static string ResolveDatabasePath()
+    {
+        const string FileName = "vpn-watchdog-gui.db";
+
+        string? exeDirectory = Path.GetDirectoryName(Environment.ProcessPath);
+        return string.IsNullOrWhiteSpace(exeDirectory)
+            ? FileName
+            : Path.Combine(exeDirectory, FileName);
     }
 
     /// <summary>A copy to edit without disturbing the live instance until the user confirms.</summary>

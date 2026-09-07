@@ -44,6 +44,9 @@ public sealed class GitHubUpdateChecker : IUpdateChecker, IDisposable
     private readonly HttpClient _http;
     private readonly bool _ownsHttpClient;
     private readonly string _apiUrl;
+    private readonly string _owner;
+    private readonly string _repo;
+    private readonly string _fallbackReleaseUrl;
 
     /// <param name="httpClient">
     /// Inject a fake for tests; omit to get a real one owned (and disposed) by
@@ -54,7 +57,10 @@ public sealed class GitHubUpdateChecker : IUpdateChecker, IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
         ArgumentException.ThrowIfNullOrWhiteSpace(repo);
 
+        _owner = owner;
+        _repo = repo;
         _apiUrl = $"https://api.github.com/repos/{owner}/{repo}/releases/latest";
+        _fallbackReleaseUrl = $"https://github.com/{owner}/{repo}/releases/latest";
         _ownsHttpClient = httpClient is null;
         _http = httpClient ?? new HttpClient();
 
@@ -104,7 +110,16 @@ public sealed class GitHubUpdateChecker : IUpdateChecker, IDisposable
                 ? UpdateCheckOutcome.UpdateAvailable
                 : UpdateCheckOutcome.UpToDate;
 
-            return new UpdateCheckResult(outcome, tag, release!.HtmlUrl);
+            // The caller hands this straight to the shell (Process.Start) when
+            // the user clicks the version label, so it must never be trusted
+            // verbatim from the response - only a plain https://github.com/{owner}/{repo}/...
+            // URL is accepted; anything else (a malformed value, an unexpected
+            // host, or a missing html_url entirely) falls back to a known-safe
+            // constant URL rather than either propagating something unvalidated
+            // or silently dropping a genuine update notice.
+            string releaseUrl = IsSafeReleaseUrl(release!.HtmlUrl) ? release.HtmlUrl! : _fallbackReleaseUrl;
+
+            return new UpdateCheckResult(outcome, tag, releaseUrl);
         }
         catch
         {
@@ -121,6 +136,24 @@ public sealed class GitHubUpdateChecker : IUpdateChecker, IDisposable
         {
             _http.Dispose();
         }
+    }
+
+    /// <summary>
+    /// True only for an absolute https URL on exactly github.com, under this
+    /// checker's own owner/repo. Rejects everything else: a non-https scheme, a
+    /// UNC/local path, a different host, or a malformed value - all of which
+    /// would otherwise be handed to <c>Process.Start(UseShellExecute: true)</c>
+    /// by the caller with no further check.
+    /// </summary>
+    private bool IsSafeReleaseUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return false;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)) return false;
+        if (uri.Scheme != Uri.UriSchemeHttps) return false;
+        if (!string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase)) return false;
+
+        string expectedPrefix = $"/{_owner}/{_repo}/";
+        return uri.AbsolutePath.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class GitHubReleaseResponse

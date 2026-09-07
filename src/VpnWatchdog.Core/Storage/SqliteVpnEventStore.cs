@@ -13,15 +13,22 @@ namespace VpnWatchdog.Core.Storage;
 /// internally, so this stays cheap while avoiding long-lived-connection locking
 /// hazards in a process that may run for days.
 /// </summary>
-public sealed class SqliteVpnEventStore : IVpnEventStore
+public sealed class SqliteVpnEventStore : IVpnEventStore, IDisposable
 {
     private readonly string _connectionString;
     private readonly SemaphoreSlim _schemaLock = new(1, 1);
     private bool _schemaEnsured;
+    private bool _disposed;
 
     public SqliteVpnEventStore(string databasePath)
     {
-        _connectionString = "Data Source=" + databasePath;
+        // Built rather than concatenated: databasePath comes from a JSON config
+        // file (CLI's appsettings.json, or the GUI's own settings), so it is
+        // NOT purely developer-chosen the way it might look - a value
+        // containing ';' concatenated raw would inject extra connection-string
+        // keywords (Mode, Cache, Password, Pooling...) instead of naming a
+        // file. Same reasoning as SqliteVpnActivityLog's connection string.
+        _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     }
 
     private const string CreateSchemaSql = """
@@ -243,7 +250,12 @@ public sealed class SqliteVpnEventStore : IVpnEventStore
                 DisconnectClassification: reader.GetString(3),
                 DisconnectReasonCode: reader.IsDBNull(4) ? null : reader.GetString(4),
                 DisconnectReasonText: reader.IsDBNull(5) ? null : reader.GetString(5),
-                InternetStateAtDisconnect: Enum.Parse<InternetState>(reader.GetString(6)),
+                // TryParse, not Parse: a row written by a future schema version (or one
+                // hand-edited/corrupted) must degrade to Unknown, never throw and take
+                // this entire read with it.
+                InternetStateAtDisconnect: Enum.TryParse(reader.GetString(6), out InternetState internetState)
+                    ? internetState
+                    : InternetState.Unknown,
                 FortiVpnProcessRunningAtDisconnect: reader.GetInt64(7) != 0,
                 FortiSslVpnDaemonRunningAtDisconnect: reader.GetInt64(8) != 0,
                 PreviousConnectedDuration: reader.IsDBNull(9) ? null : TimeSpan.FromSeconds(reader.GetDouble(9)),
@@ -258,4 +270,31 @@ public sealed class SqliteVpnEventStore : IVpnEventStore
 
     private static DateTimeOffset ParseTimestamp(string text) =>
         DateTimeOffset.ParseExact(text, "o", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+
+    /// <summary>
+    /// Connection-per-operation means nothing long-lived is held BY THIS CLASS, but
+    /// the Microsoft.Data.Sqlite pool is: it keeps native file handles to the database
+    /// open for as long as the process runs, which on Windows blocks anyone from
+    /// deleting, moving, or backing up the file. Release them explicitly rather than
+    /// waiting for a GC finalizer that may never run - same reasoning, and the same
+    /// pattern, as <see cref="Logging.SqliteVpnActivityLog.Dispose"/>.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        try
+        {
+            // Never opened - it exists only to name the pool to clear.
+            using var identifiesThePool = new SqliteConnection(_connectionString);
+            SqliteConnection.ClearPool(identifiesThePool);
+        }
+        catch
+        {
+            // Failure to release must never propagate out of Dispose.
+        }
+
+        _schemaLock.Dispose();
+    }
 }

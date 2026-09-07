@@ -155,10 +155,10 @@ public sealed class SqliteVpnActivityLog : IVpnActivityLog, IDisposable
         // not a reason to refuse to keep a trail.
         _maxEntries = Math.Max(1, maxEntries);
 
-        // Built rather than concatenated (unlike SqliteVpnEventStore) because this path
-        // is not developer-chosen: it comes from %LOCALAPPDATA%, so it embeds a Windows
-        // account name that may contain characters the connection-string grammar treats
-        // as syntax. The builder quotes them correctly.
+        // Built rather than concatenated: this path comes from %LOCALAPPDATA%, so it
+        // embeds a Windows account name that may contain characters the connection-
+        // string grammar treats as syntax. The builder quotes them correctly. (Same
+        // reasoning as SqliteVpnEventStore's own connection string.)
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = databasePath,

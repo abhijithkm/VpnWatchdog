@@ -207,8 +207,12 @@ public sealed class VpnEventCorrelator : IVpnEventCorrelator
         }
     }
 
+    // OrdinalIgnoreCase, matching FortiClientLogMonitor.Classify and every other
+    // profile comparison in this app: a case difference between the configured
+    // profile name and what FortiClient happens to log must never silently
+    // drop evidence for the profile being watched.
     private bool ProfileMatches(string? profileName) =>
-        string.Equals(profileName, _profileName, StringComparison.Ordinal);
+        string.Equals(profileName, _profileName, StringComparison.OrdinalIgnoreCase);
 
     private bool HasVpnConnectedLogEvent(IReadOnlyList<LogEvent> newLogEvents)
     {
@@ -268,9 +272,19 @@ public sealed class VpnEventCorrelator : IVpnEventCorrelator
         for (var i = _recentLogEvents.Count - 1; i >= 0; i--)
         {
             var logEvent = _recentLogEvents[i];
-            if (logEvent.EventType == LogEventType.Unknown &&
-                ProfileMatches(logEvent.ProfileName) &&
-                !string.IsNullOrEmpty(logEvent.ReasonText))
+
+            // No ProfileMatches check here, deliberately: FortiClientLogMonitor's
+            // DisconnectionReasonRegex line format ("disconnection reason: N,
+            // ('text')") carries no profile name at all - the ONLY LogEvents this
+            // app ever produces with EventType Unknown AND a non-empty ReasonText
+            // are exactly these, so the type+ReasonText combination is already as
+            // specific as this log format allows. Requiring a profile match here
+            // is not "more careful", it is impossible to ever satisfy - see the
+            // Classify method for why. Attributing it to a DIFFERENT profile's
+            // disconnect is a real risk only if FortiClient is running more than
+            // one tunnel at once, which this single-profile app does not support
+            // today (see the "multi-profile support" known limitation).
+            if (logEvent.EventType == LogEventType.Unknown && !string.IsNullOrEmpty(logEvent.ReasonText))
             {
                 // The observed ReasonText itself IS the classification (e.g.
                 // "Cancelled") - never re-interpreted into invented semantics.

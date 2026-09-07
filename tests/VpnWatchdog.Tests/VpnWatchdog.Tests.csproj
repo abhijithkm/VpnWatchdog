@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\VpnWatchdog.Core\VpnWatchdog.Core.csproj" />
+    <ProjectReference Include="..\..\src\VpnWatchdog.Cli\VpnWatchdog.Cli.csproj" />
   </ItemGroup>
 
 </Project>

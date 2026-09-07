@@ -73,14 +73,19 @@ public static class AppConfigLoader
             ProfileName: NonEmptyOr(overrides.ProfileName, defaults.ProfileName),
             AdapterDescriptionPattern: NonEmptyOr(overrides.AdapterDescriptionPattern, defaults.AdapterDescriptionPattern),
             HttpsProbeUrl: NonEmptyOr(overrides.HttpsProbeUrl, defaults.HttpsProbeUrl),
-            PollIntervalMs: overrides.PollIntervalMs ?? defaults.PollIntervalMs,
+            PollIntervalMs: ClampPollIntervalMs(overrides.PollIntervalMs ?? defaults.PollIntervalMs),
             HeartbeatIntervalMs: overrides.HeartbeatIntervalMs ?? defaults.HeartbeatIntervalMs,
-            OpenCorrelationTimeoutMinutes: overrides.OpenCorrelationTimeoutMinutes ?? defaults.OpenCorrelationTimeoutMinutes,
+            OpenCorrelationTimeoutMinutes: Math.Max(1, overrides.OpenCorrelationTimeoutMinutes ?? defaults.OpenCorrelationTimeoutMinutes),
             FortiClientLogDirectory: NonEmptyOr(overrides.FortiClientLogDirectory, defaults.FortiClientLogDirectory),
             DatabasePath: NonEmptyOr(overrides.DatabasePath, defaults.DatabasePath),
             AutoReconnectEnabled: overrides.AutoReconnectEnabled ?? defaults.AutoReconnectEnabled,
             ReconnectGracePeriodSeconds: overrides.ReconnectGracePeriodSeconds ?? defaults.ReconnectGracePeriodSeconds,
-            ReconnectMaxAttempts: overrides.ReconnectMaxAttempts ?? defaults.ReconnectMaxAttempts,
+
+            // At least one attempt: zero would be "auto-reconnect on, but never
+            // reconnect", silently advertising a switch that can never do
+            // anything - same reasoning, and the same floor, as the GUI's
+            // GuiSettingLimits.MinReconnectAttempts.
+            ReconnectMaxAttempts: Math.Max(1, overrides.ReconnectMaxAttempts ?? defaults.ReconnectMaxAttempts),
             ReconnectInitialBackoffSeconds: overrides.ReconnectInitialBackoffSeconds ?? defaults.ReconnectInitialBackoffSeconds,
             ReconnectMaxBackoffSeconds: overrides.ReconnectMaxBackoffSeconds ?? defaults.ReconnectMaxBackoffSeconds,
             ReconnectVerifyTimeoutSeconds: overrides.ReconnectVerifyTimeoutSeconds ?? defaults.ReconnectVerifyTimeoutSeconds,
@@ -90,6 +95,17 @@ public static class AppConfigLoader
 
     private static string NonEmptyOr(string? value, string fallback) =>
         string.IsNullOrWhiteSpace(value) ? fallback : value;
+
+    /// <summary>
+    /// Floored at 500ms - the same floor and the same reason as the GUI's
+    /// GuiSettingLimits.MinPollIntervalMs ("below half a second the probes
+    /// themselves take longer than the interval"). Also the difference between
+    /// a config typo and a genuine incident: an unvalidated value here reaches
+    /// <c>Task.Delay(config.PollIntervalMs, ct)</c> in the poll loop, where 0
+    /// busy-spins, -1 waits forever, and anything below -1 throws
+    /// ArgumentOutOfRangeException uncaught at startup.
+    /// </summary>
+    private static int ClampPollIntervalMs(int value) => Math.Max(500, value);
 
     /// <summary>
     /// Every field nullable/optional by design so a config file can specify only the

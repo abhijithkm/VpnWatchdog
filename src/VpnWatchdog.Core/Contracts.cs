@@ -486,7 +486,7 @@ public sealed record WatchdogConfig(
         ActivityLogMaxEntries: 5000);
 
     /// <summary>
-    /// %LOCALAPPDATA%\VpnWatchdogctivity-log.db - user-scoped and writable
+    /// %LOCALAPPDATA%\VpnWatchdog\activity-log.db - user-scoped and writable
     /// without elevation, unlike a path next to the executable under Program Files.
     /// </summary>
     public static string DefaultActivityLogPath { get; } = System.IO.Path.Combine(

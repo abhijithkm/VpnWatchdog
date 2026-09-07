@@ -20,8 +20,18 @@ internal static class Program
             // instance instead of starting one. Broadcast rather than
             // FindWindow-by-title: it still reaches the other instance's
             // hidden window even while it's minimised to tray.
-            NativeMethods.PostMessage(
-                NativeMethods.HwndBroadcast, MainForm.ShowExistingInstanceMessage, IntPtr.Zero, IntPtr.Zero);
+            //
+            // Guarded on != 0: RegisterWindowMessage returns 0 on the (very
+            // rare) failure case, and 0 is WM_NULL - a real message other
+            // software sends for its own reasons. Broadcasting THAT to every
+            // top-level window in the session on a registration failure would
+            // be actively harmful, not just a no-op.
+            if (MainForm.ShowExistingInstanceMessage != 0)
+            {
+                NativeMethods.PostMessage(
+                    NativeMethods.HwndBroadcast, MainForm.ShowExistingInstanceMessage, IntPtr.Zero, IntPtr.Zero);
+            }
+
             return;
         }
 

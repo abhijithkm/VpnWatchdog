@@ -878,6 +878,7 @@ public static class Program
         // this log and is guarded by the same reportWritten latch, so by this point it
         // can no longer run and cannot find a closed log underneath it.
         DisposeActivityLog(activityLog);
+        DisposeEventStore(store);
 
         return 0;
     }
@@ -1627,6 +1628,31 @@ public static class Program
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Warning: failed to close the activity log cleanly: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Closes the evidence store's SQLite connection pool if its implementation holds
+    /// one. Never throws. The process is about to exit either way, so this matters
+    /// less here than in the GUI (a long-lived process across many Start/Stop
+    /// cycles) - done anyway for symmetry with <see cref="DisposeActivityLog"/> and
+    /// so the file's handles are released the moment this run ends, not whenever the
+    /// OS gets around to it.
+    /// </summary>
+    private static void DisposeEventStore(IVpnEventStore store)
+    {
+        if (store is not IDisposable disposable)
+        {
+            return;
+        }
+
+        try
+        {
+            disposable.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Warning: failed to close the evidence store cleanly: {ex.Message}");
         }
     }
 

@@ -241,7 +241,6 @@ partial class MainForm
         btnMonitorToggle.Margin = new Padding(12, 0, 0, 0);
         btnMonitorToggle.Anchor = AnchorStyles.None;
         btnMonitorToggle.Cursor = Cursors.Hand;
-        btnMonitorToggle.TabStop = false;
         toolTip.SetToolTip(btnMonitorToggle, "Start or stop monitoring the VPN");
         btnMonitorToggle.Click += BtnMonitorToggle_Click;
 
@@ -257,7 +256,6 @@ partial class MainForm
         btnSettings.Anchor = AnchorStyles.Right;
         btnSettings.Margin = new Padding(0);
         btnSettings.Cursor = Cursors.Hand;
-        btnSettings.TabStop = false;
         toolTip.SetToolTip(btnSettings, "Settings");
         btnSettings.Click += BtnSettings_Click;
 

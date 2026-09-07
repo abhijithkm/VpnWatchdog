@@ -125,6 +125,70 @@ public class GitHubUpdateCheckerTests
         Assert.Equal(UpdateCheckOutcome.CheckFailed, result.Outcome);
     }
 
+    // ------------------------------------------------------------------
+    // ReleaseUrl is handed straight to Process.Start(UseShellExecute: true) by
+    // the GUI when the user clicks the version label - these confirm a
+    // response cannot smuggle anything else through it. Every case here still
+    // reports UpdateAvailable with the real tag: a validation failure must
+    // replace the URL with a known-safe fallback, never silently swallow a
+    // genuine update the way a null/rejected ReleaseUrl would if the caller
+    // required it non-null to show the notice at all.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task CheckForUpdateAsync_WhenHtmlUrlHostIsNotGitHub_FallsBackToTheSafeReleasesUrl()
+    {
+        using var handler = FakeHandler.Json("""{"tag_name":"v2.0.0","html_url":"https://evil.example/owner/repo/releases/tag/v2.0.0"}""");
+        using var checker = Checker(handler);
+
+        UpdateCheckResult result = await checker.CheckForUpdateAsync(Current, CancellationToken.None);
+
+        Assert.Equal(UpdateCheckOutcome.UpdateAvailable, result.Outcome);
+        Assert.Equal("v2.0.0", result.LatestVersionTag);
+        Assert.Equal("https://github.com/owner/repo/releases/latest", result.ReleaseUrl);
+    }
+
+    [Fact]
+    public async Task CheckForUpdateAsync_WhenHtmlUrlIsNotHttps_FallsBackToTheSafeReleasesUrl()
+    {
+        // A non-https scheme handed to Process.Start(UseShellExecute: true) could
+        // launch a local file or an arbitrary registered protocol handler.
+        using var handler = FakeHandler.Json("""{"tag_name":"v2.0.0","html_url":"file:///C:/evil.exe"}""");
+        using var checker = Checker(handler);
+
+        UpdateCheckResult result = await checker.CheckForUpdateAsync(Current, CancellationToken.None);
+
+        Assert.Equal(UpdateCheckOutcome.UpdateAvailable, result.Outcome);
+        Assert.Equal("https://github.com/owner/repo/releases/latest", result.ReleaseUrl);
+    }
+
+    [Fact]
+    public async Task CheckForUpdateAsync_WhenHtmlUrlIsForADifferentRepo_FallsBackToTheSafeReleasesUrl()
+    {
+        // Same host, but a different owner/repo path - defense in depth even
+        // though a same-host redirect is not the likely attack shape here.
+        using var handler = FakeHandler.Json("""{"tag_name":"v2.0.0","html_url":"https://github.com/someone-else/other-repo/releases/tag/v2.0.0"}""");
+        using var checker = Checker(handler);
+
+        UpdateCheckResult result = await checker.CheckForUpdateAsync(Current, CancellationToken.None);
+
+        Assert.Equal(UpdateCheckOutcome.UpdateAvailable, result.Outcome);
+        Assert.Equal("https://github.com/owner/repo/releases/latest", result.ReleaseUrl);
+    }
+
+    [Fact]
+    public async Task CheckForUpdateAsync_WhenHtmlUrlIsMissing_StillReportsTheUpdate_WithTheSafeReleasesUrl()
+    {
+        using var handler = FakeHandler.Json("""{"tag_name":"v2.0.0"}""");
+        using var checker = Checker(handler);
+
+        UpdateCheckResult result = await checker.CheckForUpdateAsync(Current, CancellationToken.None);
+
+        Assert.Equal(UpdateCheckOutcome.UpdateAvailable, result.Outcome);
+        Assert.Equal("v2.0.0", result.LatestVersionTag);
+        Assert.Equal("https://github.com/owner/repo/releases/latest", result.ReleaseUrl);
+    }
+
     [Fact]
     public async Task CheckForUpdateAsync_RequestCarriesAUserAgent_GitHubRejectsRequestsWithout()
     {

@@ -18,9 +18,6 @@ public sealed class AboutForm : Form
 {
     // Same Windows 11 palette as SettingsForm - kept as a local literal copy
     // rather than a shared type, matching how every dialog in this app is styled.
-    private static readonly Color Accent = Color.FromArgb(0x00, 0x67, 0xC0);
-    private static readonly Color AccentHover = Color.FromArgb(0x19, 0x75, 0xC5);
-    private static readonly Color AccentPressed = Color.FromArgb(0x31, 0x83, 0xCA);
     private static readonly Color Surface = Color.FromArgb(0xF9, 0xF9, 0xF9);
     private static readonly Color Hairline = Color.FromArgb(0xE5, 0xE5, 0xE5);
     private static readonly Color MutedText = Color.FromArgb(0x6E, 0x6E, 0x6E);
@@ -308,23 +305,5 @@ public sealed class AboutForm : Form
     {
         Version? version = typeof(AboutForm).Assembly.GetName().Version;
         return version is null ? "v1.0.0" : $"v{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}";
-    }
-
-    /// <summary>Flat Windows 11 accent button - matches SettingsForm's OK styling.</summary>
-    private static void StyleButton(Button button, string text)
-    {
-        button.Text = text;
-        button.AutoSize = true;
-        button.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        button.MinimumSize = new Size(84, 27);
-        button.Padding = new Padding(8, 0, 8, 0);
-        button.Margin = Padding.Empty;
-        button.FlatStyle = FlatStyle.Flat;
-        button.UseVisualStyleBackColor = false;
-        button.BackColor = Accent;
-        button.ForeColor = Color.White;
-        button.FlatAppearance.BorderSize = 0;
-        button.FlatAppearance.MouseOverBackColor = AccentHover;
-        button.FlatAppearance.MouseDownBackColor = AccentPressed;
     }
 }

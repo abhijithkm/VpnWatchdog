@@ -70,6 +70,23 @@ public class CorrelatorStateMachineTests
             ReasonText: "Cancelled",
             SourceFile: "FortiVPN_1.log");
 
+    /// <summary>
+    /// Mirrors what FortiClientLogMonitor.Classify actually produces for its
+    /// DisconnectionReasonRegex line ("disconnection reason: N, ('text')"): note
+    /// ProfileName is always null - that specific log line format carries no
+    /// profile field at all, which is exactly the case ClassifyNearbyDisconnect's
+    /// second loop must still be able to match.
+    /// </summary>
+    private static LogEvent CancelledReasonLogEvent(DateTimeOffset at) =>
+        new(
+            Timestamp: at,
+            ProfileName: null,
+            EventType: LogEventType.Unknown,
+            RawLine: $"[{at:yyyy-MM-dd HH:mm:ss.fffffff} UTC-04:00] disconnection reason: 21, (\"Cancelled\")",
+            ReasonCode: "21",
+            ReasonText: "Cancelled",
+            SourceFile: "FortiVPN_1.log");
+
     // ------------------------------------------------------------------
     // 1. Connected adapter+IP -> State reported as Connected.
     // ------------------------------------------------------------------
@@ -217,6 +234,34 @@ public class CorrelatorStateMachineTests
         Assert.NotEqual("Unexpected", completed.DisconnectClassification);
         Assert.Null(completed.DisconnectReasonCode);
         Assert.Null(completed.DisconnectReasonText);
+    }
+
+    // ------------------------------------------------------------------
+    // 7. A profile-less "disconnection reason: N, (text)" LogEvent right around
+    //    the disconnect transition -> the ReasonText itself becomes the
+    //    classification (e.g. "Cancelled"), even though this log line format
+    //    never carries a profile name to match against. Regression test for a
+    //    bug where ClassifyNearbyDisconnect's second loop additionally required
+    //    a profile match that this event type can never satisfy, making the
+    //    branch permanently unreachable.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void CancelledReasonLogEvent_NearTheDisconnectTransition_BecomesTheClassification()
+    {
+        var sut = new VpnEventCorrelator(Profile, 30);
+        var t1 = T0.AddSeconds(10);
+        var t2 = t1.AddSeconds(20);
+
+        sut.Ingest(ConnectedAdapter(T0), InternetUp(T0), ProcessesRunning(T0), NoLogEvents, T0);
+        sut.Ingest(DownAdapter(t1), InternetUp(t1), ProcessesRunning(t1),
+            new[] { CancelledReasonLogEvent(t1) }, t1);
+        sut.Ingest(ConnectedAdapter(t2), InternetUp(t2), ProcessesRunning(t2), NoLogEvents, t2);
+
+        var completed = Assert.Single(sut.GetCompletedCorrelations());
+        Assert.Equal("Cancelled", completed.DisconnectClassification);
+        Assert.Equal("21", completed.DisconnectReasonCode);
+        Assert.Equal("Cancelled", completed.DisconnectReasonText);
     }
 
     // ------------------------------------------------------------------

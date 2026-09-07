@@ -126,6 +126,7 @@ public sealed class FortiClientLogMonitor : IFortiClientLogMonitor
                 state.LastLength = currentLength;
                 state.LastCreationTimeUtc = creationUtc;
                 state.PendingPartial = string.Empty;
+                state.PendingRawTail = Array.Empty<byte>();
                 state.Initialized = true;
                 continue;
             }
@@ -138,6 +139,7 @@ public sealed class FortiClientLogMonitor : IFortiClientLogMonitor
                 state.Offset = 0;
                 state.LastLength = 0;
                 state.PendingPartial = string.Empty;
+                state.PendingRawTail = Array.Empty<byte>();
             }
 
             state.LastCreationTimeUtc = creationUtc;
@@ -159,6 +161,7 @@ public sealed class FortiClientLogMonitor : IFortiClientLogMonitor
             {
                 seekPosition = 0;
                 state.PendingPartial = string.Empty;
+                state.PendingRawTail = Array.Empty<byte>();
             }
 
             long bytesAvailable = currentLength - seekPosition;
@@ -201,7 +204,29 @@ public sealed class FortiClientLogMonitor : IFortiClientLogMonitor
                 continue;
             }
 
-            string newText = Encoding.UTF8.GetString(buffer, 0, totalRead);
+            // Prepend whatever trailing bytes a PREVIOUS tick held back because they
+            // were a UTF-8 sequence cut off mid-character at that tick's read
+            // boundary - decoding them now, together with what follows, is what
+            // decodes that character whole instead of as a lossy U+FFFD replacement.
+            byte[] rawBytes;
+            if (state.PendingRawTail.Length > 0)
+            {
+                rawBytes = new byte[state.PendingRawTail.Length + totalRead];
+                Buffer.BlockCopy(state.PendingRawTail, 0, rawBytes, 0, state.PendingRawTail.Length);
+                Buffer.BlockCopy(buffer, 0, rawBytes, state.PendingRawTail.Length, totalRead);
+            }
+            else
+            {
+                rawBytes = totalRead == buffer.Length ? buffer : buffer[..totalRead];
+            }
+
+            // THIS tick's read may itself end mid-character - hold those trailing
+            // bytes back rather than decoding them now, so the same recovery applies
+            // to them on the NEXT tick.
+            int completeByteCount = FindCompleteUtf8Boundary(rawBytes, rawBytes.Length);
+            state.PendingRawTail = rawBytes[completeByteCount..];
+
+            string newText = Encoding.UTF8.GetString(rawBytes, 0, completeByteCount);
             string combined = state.PendingPartial + newText;
             string[] parts = combined.Split('\n');
 
@@ -244,6 +269,13 @@ public sealed class FortiClientLogMonitor : IFortiClientLogMonitor
 
     private LogEvent? Classify(string line, string sourceFile)
     {
+        // Every profile comparison below is OrdinalIgnoreCase, matching
+        // VpnEventCorrelator.ProfileMatches and every other profile comparison
+        // in this app (e.g. against FortiClient's own GetTunnelList response):
+        // a case difference between the configured profile name and what
+        // FortiClient happens to log must never silently drop every log event
+        // for the profile being watched.
+        //
         // Pattern 1 must be checked before pattern 2: its literal text is a
         // substring of some pattern-1 lines, so once pattern 1 has matched we
         // must not also fall through and classify the same line as pattern 2.
@@ -251,7 +283,7 @@ public sealed class FortiClientLogMonitor : IFortiClientLogMonitor
         if (match.Success)
         {
             string profile = match.Groups["profile"].Value;
-            if (profile != _profileName)
+            if (!string.Equals(profile, _profileName, StringComparison.OrdinalIgnoreCase))
             {
                 return null;
             }
@@ -264,7 +296,7 @@ public sealed class FortiClientLogMonitor : IFortiClientLogMonitor
         if (match.Success)
         {
             string profile = match.Groups["profile"].Value;
-            if (profile != _profileName)
+            if (!string.Equals(profile, _profileName, StringComparison.OrdinalIgnoreCase))
             {
                 return null;
             }
@@ -277,7 +309,7 @@ public sealed class FortiClientLogMonitor : IFortiClientLogMonitor
         if (match.Success)
         {
             string profile = match.Groups["profile"].Value;
-            if (profile != _profileName)
+            if (!string.Equals(profile, _profileName, StringComparison.OrdinalIgnoreCase))
             {
                 return null;
             }
@@ -300,7 +332,7 @@ public sealed class FortiClientLogMonitor : IFortiClientLogMonitor
         if (match.Success)
         {
             string profile = match.Groups["profile"].Value;
-            if (profile != _profileName)
+            if (!string.Equals(profile, _profileName, StringComparison.OrdinalIgnoreCase))
             {
                 return null;
             }
@@ -322,6 +354,48 @@ public sealed class FortiClientLogMonitor : IFortiClientLogMonitor
         // Does not match any known category - deliberately do not yield an event
         // (avoid flooding the stream with Unknown for every info-level line).
         return null;
+    }
+
+    /// <summary>
+    /// The number of leading bytes in <paramref name="buffer"/> (first <paramref
+    /// name="length"/> of them) that form only WHOLE UTF-8 characters - i.e. where
+    /// to cut so a multi-byte sequence straddling the end of a chunked disk read is
+    /// never decoded half-present into a lossy U+FFFD replacement character.
+    /// Walks back at most 3 bytes (the longest possible incomplete tail of a 4-byte
+    /// UTF-8 sequence) looking for the lead byte of whatever sequence is open at
+    /// the end of the buffer.
+    /// </summary>
+    private static int FindCompleteUtf8Boundary(byte[] buffer, int length)
+    {
+        int maxBack = Math.Min(3, length);
+        for (int back = 1; back <= maxBack; back++)
+        {
+            byte b = buffer[length - back];
+
+            // How many bytes a UTF-8 character starting with `b` should occupy in
+            // total, or -1 if `b` is a continuation byte (10xxxxxx) rather than the
+            // start of a character - keep walking back to find the real start.
+            int expectedLength = (b & 0b1000_0000) == 0b0000_0000 ? 1
+                : (b & 0b1110_0000) == 0b1100_0000 ? 2
+                : (b & 0b1111_0000) == 0b1110_0000 ? 3
+                : (b & 0b1111_1000) == 0b1111_0000 ? 4
+                : -1;
+
+            if (expectedLength == -1)
+            {
+                continue;
+            }
+
+            // Found the lead byte of the trailing character, `back` bytes from the
+            // end. Complete only if the buffer actually holds all of its bytes.
+            return expectedLength <= back ? length : length - back;
+        }
+
+        // No lead byte within the last 3 bytes: either a run of continuation bytes
+        // whose lead is further back (and, at 4 bytes max per character, that
+        // sequence must already be complete), or already-malformed input the
+        // decoder's own replacement-character fallback can handle as before.
+        return length;
     }
 
     private static DateTimeOffset ParseTimestamp(string line)
@@ -379,6 +453,17 @@ public sealed class FortiClientLogMonitor : IFortiClientLogMonitor
         public DateTime LastCreationTimeUtc;
 
         public string PendingPartial = string.Empty;
+
+        /// <summary>
+        /// Raw bytes physically read off disk but held back from decoding because they
+        /// are the start of a multi-byte UTF-8 sequence cut off at the end of this
+        /// tick's read - up to 3 bytes. Prepended to the NEXT tick's freshly-read bytes
+        /// before decoding, so a character split across two reads is decoded whole
+        /// instead of becoming a U+FFFD replacement character (which would otherwise
+        /// corrupt <see cref="PendingPartial"/> and could make the eventual complete
+        /// line fail to classify).
+        /// </summary>
+        public byte[] PendingRawTail = Array.Empty<byte>();
 
         /// <summary>True once this file has been observed at least once - distinguishes
         /// "first ever look at this file" (skip to end, do not backfill history) from a
