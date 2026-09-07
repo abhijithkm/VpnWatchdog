@@ -1,0 +1,20 @@
+# Build output
+bin/
+obj/
+publish/
+
+# IDE / editor
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Local runtime data - never commit real settings, databases, or logs
+appsettings.json
+*.db
+*.db-shm
+*.db-wal
+*.log
+vpn-watchdog-summary-*.txt
+gui-settings.json
+activity-log.db

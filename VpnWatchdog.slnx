@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VpnWatchdog.Cli/VpnWatchdog.Cli.csproj" />
+    <Project Path="src/VpnWatchdog.Core/VpnWatchdog.Core.csproj" />
+    <Project Path="src/VpnWatchdog.Gui/VpnWatchdog.Gui.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VpnWatchdog.Tests/VpnWatchdog.Tests.csproj" />
+  </Folder>
+</Solution>

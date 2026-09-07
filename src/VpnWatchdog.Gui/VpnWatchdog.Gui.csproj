@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>VpnWatchdogGui</AssemblyName>
+    <ApplicationVisualStyles>true</ApplicationVisualStyles>
+    <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
+    <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VpnWatchdog.Core\VpnWatchdog.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Baked into the assembly so the window titlebar/tray icon never depend on a
+         file being present next to the exe at runtime - same icon the exe/taskbar
+         already show via ApplicationIcon above, loaded back out by MainForm. -->
+    <EmbeddedResource Include="Assets\icon.ico">
+      <LogicalName>AppIcon.ico</LogicalName>
+    </EmbeddedResource>
+    <!-- The text+name wordmark, shown only in AboutForm's banner - see
+         AboutForm.LoadEmbeddedWordmark. Icon-only stays the exe/taskbar/tray
+         glyph; a wordmark doesn't survive being shrunk to 16-32px. -->
+    <EmbeddedResource Include="Assets\wordmark.png">
+      <LogicalName>AppWordmark.png</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+</Project>

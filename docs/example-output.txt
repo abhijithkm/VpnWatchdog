@@ -1,0 +1,59 @@
+Example VPN Watchdog CLI console output
+========================================
+
+This is a representative frame of the live console dashboard (redrawn only when
+a field changes or the heartbeat interval elapses — never on every poll tick),
+plus the startup banner that precedes it. Actual field values will differ.
+
+Startup banner (auto-reconnect run)
+------------------------------------
+
+******************************************************************************
+AUTO-RECONNECT: ENABLED - will ask FortiClient to reconnect after the grace period
+  Profile:       MLA-DEV-VPN-2-LocalAuth
+  Grace period:  90s (FortiClient's own recovery gets first go)
+  Max attempts:  5 per outage, backoff 30s-300s
+  This build can CONNECT the tunnel. It never disconnects it, and never handles credentials.
+******************************************************************************
+
+Dashboard frame
+------------------------------------
+
+VPN WATCHDOG -- AUTO-RECONNECT ARMED (connect only; never disconnects)
+
+Profile:                MLA-DEV-VPN-2-LocalAuth
+VPN:                    Connected
+Adapter:                Ethernet 3
+VPN IP:                 10.240.102.3/32
+Internet:               Up
+FortiVPN:               RUNNING
+SSLVPN daemon:          RUNNING
+Current state duration: 01:47:22
+
+Events this session:
+  Unexpected disconnects: 2
+  Automatic recoveries:   2
+  Failed recoveries:      0
+
+==============================================================================
+Mode: AUTO-RECONNECT -- may ask FortiClient to CONNECT after the grace period.
+      It never disconnects the VPN and never handles credentials.
+==============================================================================
+
+Observe-only run instead shows:
+
+VPN WATCHDOG -- OBSERVE MODE (auto-reconnect off; watching only)
+...
+==============================================================================
+Mode: OBSERVE ONLY -- this run will not connect or modify the VPN.
+      It never disconnects the VPN and never handles credentials.
+==============================================================================
+
+Reconnect decision transitions (logged as they happen, not part of the redrawn
+dashboard) look like:
+
+[2026-09-05 12:25:27] RECONNECT: WaitingForSelfHeal -> Triggered - grace period elapsed - triggering a reconnect.
+[2026-09-05 12:25:27] RECONNECT: attempt #1 - asking FortiClient to connect 'MLA-DEV-VPN-2-LocalAuth' (no credentials are supplied by us).
+[2026-09-05 12:25:31] RECONNECT: attempt #1 SUCCEEDED for 'MLA-DEV-VPN-2-LocalAuth'.
+
+See docs/session-report-format.md for the shutdown summary report layout.
