@@ -316,6 +316,10 @@ partial class MainForm
         lblHeroSub.Height = 16;
         lblHeroSub.TextAlign = ContentAlignment.MiddleLeft;
         lblHeroSub.Margin = new Padding(0);
+        // Cursor/tooltip are toggled per-render in RenderHero (only meaningful
+        // while a profile-mismatch nudge is showing); the click handler itself is
+        // wired once, here, and no-ops otherwise.
+        lblHeroSub.Click += LblHeroSub_Click;
 
         pnlHero.Controls.Add(lblHeroGlyph, 0, 0);
         pnlHero.SetRowSpan(lblHeroGlyph, 3);

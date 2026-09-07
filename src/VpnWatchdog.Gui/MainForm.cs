@@ -109,6 +109,16 @@ public partial class MainForm : Form
     private bool _actionProbeInFlight;
     private int _actionStamp;
 
+    // Set from the same probe round-trip as the manual-action resolution, below.
+    // True only when FortiClient answered with a NON-EMPTY tunnel list that does
+    // not contain the configured profile name - a strong, concrete signal that
+    // whoever is running this build has never changed ProfileName away from the
+    // shipped default. An EMPTY list is deliberately treated as "no evidence
+    // either way" (COM unavailable, or this machine genuinely has zero profiles)
+    // rather than a mismatch, so a machine without FortiClient never shows a
+    // confusing "profile not found" nudge on top of the COM-unavailable state.
+    private bool _profileMismatch;
+
     // Presentation state, UI thread only.
     private VpnState _shownState = VpnState.Unknown;
     private string? _idleTunnelHint;
@@ -301,6 +311,13 @@ public partial class MainForm : Form
         RecordActivity(VpnActivityKind.MonitoringStarted, "Monitoring started",
             chkAutoReconnect.Checked ? "auto-reconnect armed" : "observe only");
 
+        // Not just for the action button: this is also how the profile-mismatch
+        // nudge gets its first chance to fire when StartMonitoringOnLaunch is set,
+        // which otherwise never calls this probe at all - the poll loop resolves
+        // Connected/Disconnected on its own, but nothing else asks FortiClient
+        // whether it has even heard of this profile name.
+        BeginResolveManualAction();
+
         pollTimer.Interval = Math.Max(MinPollIntervalMs, _config.PollIntervalMs);
         pollTimer.Start();
         // Render an immediate first frame rather than waiting for the first tick.
@@ -436,6 +453,19 @@ public partial class MainForm : Form
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
         ApplySettings(dialog.Result);
+    }
+
+    /// <summary>
+    /// The hero sub-line only behaves like a button while it is showing the
+    /// profile-mismatch nudge (see RenderHero) - re-checking the flag here rather
+    /// than unhooking/rehooking the event keeps this a single, permanent
+    /// subscription instead of one added and removed on every render.
+    /// </summary>
+    private void LblHeroSub_Click(object? sender, EventArgs e)
+    {
+        if (!_profileMismatch) return;
+
+        BtnSettings_Click(sender, e);
     }
 
     private void ApplySettings(GuiSettings updated)
@@ -833,10 +863,23 @@ public partial class MainForm : Form
             }
         }
 
+        // A pinned notice is something happening right now (the user just clicked
+        // something and is watching for the result) and always wins. Failing that,
+        // a profile mismatch outranks the ordinary state text: knowing FortiClient
+        // has never heard of this profile name is more useful than "Checking..." or
+        // "Auto-reconnect is off", and it is the one thing on this screen the user
+        // can actually go fix.
+        bool subIsClickable = false;
         if (TryGetNotice(out string noticeText, out Color noticeColour))
         {
             sub = noticeText;
             subColour = noticeColour;
+        }
+        else if (_profileMismatch)
+        {
+            sub = $"Profile \"{_config.ProfileName}\" not found on this FortiClient - click to fix in Settings";
+            subColour = Palette.Amber;
+            subIsClickable = true;
         }
 
         lblHeroGlyph.Text = glyph;
@@ -846,6 +889,10 @@ public partial class MainForm : Form
         lblHeroProfile.Text = _config.ProfileName;
         lblHeroSub.Text = sub;
         lblHeroSub.ForeColor = subColour;
+        lblHeroSub.Cursor = subIsClickable ? Cursors.Hand : Cursors.Default;
+        toolTip.SetToolTip(lblHeroSub, subIsClickable
+            ? "FortiClient does not know this profile name. Open Settings and set the profile name to one of yours."
+            : "");
         pnlHero.SetTint(tint, edge);
 
         // The window may be hidden in the tray, so the tooltip carries the headline.
@@ -1525,6 +1572,7 @@ public partial class MainForm : Form
         _ = Task.Run(async () =>
         {
             bool? connected = null;
+            bool profileMismatch = false;
 
             // Non-null only when this probe had to create its own controller and is
             // therefore the one that has to release it.
@@ -1533,12 +1581,24 @@ public partial class MainForm : Form
             {
                 IReconnectController probe = existing ?? (owned = FortiClientComReconnectController.FromConfig(_config));
                 connected = await probe.IsConnectedAsync(profileName, CancellationToken.None).ConfigureAwait(false);
+
+                // Piggy-backed on the same probe/round-trip rather than a second COM
+                // call: a non-empty tunnel list that does not contain the configured
+                // profile is the strongest evidence available that ProfileName still
+                // holds the shipped-default value on a machine whose FortiClient has
+                // never heard of that profile - exactly the "shared the .exe with a
+                // teammate and it just says Unknown forever" failure mode.
+                IReadOnlyList<string> knownTunnels =
+                    await probe.GetTunnelListAsync(CancellationToken.None).ConfigureAwait(false);
+                profileMismatch = knownTunnels.Count > 0 &&
+                    !knownTunnels.Any(t => string.Equals(t, profileName, StringComparison.OrdinalIgnoreCase));
             }
             catch
             {
                 // FortiClient COM missing, blocked, or torn down under us. Leaving
                 // the button as it is is the right degradation: the fail-safe
-                // default is Connect, which cannot drop anyone's tunnel.
+                // default is Connect, which cannot drop anyone's tunnel. An empty
+                // tunnel list from this path is "no evidence", not a mismatch.
                 connected = null;
             }
             finally
@@ -1551,6 +1611,15 @@ public partial class MainForm : Form
                 RunOnUiThread(() =>
                 {
                     _actionProbeInFlight = false;
+
+                    // Independent of which VPN state is currently shown - a config
+                    // mismatch does not go stale the way an IsConnected answer does,
+                    // so it is applied even if the stamp moved on below.
+                    if (_profileMismatch != profileMismatch)
+                    {
+                        _profileMismatch = profileMismatch;
+                        RenderHero();
+                    }
 
                     // Observed evidence arrived while we were asking - it is fresher
                     // than this answer, so drop ours rather than flipping the button
