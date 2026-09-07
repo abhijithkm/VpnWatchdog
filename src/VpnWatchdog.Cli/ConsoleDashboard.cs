@@ -38,6 +38,7 @@ public sealed class ConsoleDashboard
         IVpnEventCorrelator correlator,
         DateTimeOffset now,
         ThroughputSample? throughput = null,
+        bool downloadUnsupported = false,
         string? updateNotice = null)
     {
         IReadOnlyList<DisconnectCorrelation> completed = correlator.GetCompletedCorrelations();
@@ -114,7 +115,8 @@ public sealed class ConsoleDashboard
         PrintField("FortiVPN:", fortiVpnRunning ? "RUNNING" : "NOT RUNNING");
         PrintField("SSLVPN daemon:", sslVpnDaemonRunning ? "RUNNING" : "NOT RUNNING");
         PrintField("Network:", throughput is { } rate
-            ? $"down {FormatRate(rate.DownloadBytesPerSecond)}, up {FormatRate(rate.UploadBytesPerSecond)} " +
+            ? $"down {(downloadUnsupported ? "n/a (not reported by adapter)" : FormatRate(rate.DownloadBytesPerSecond))}, " +
+              $"up {FormatRate(rate.UploadBytesPerSecond)} " +
               $"(total: {FormatBytes(rate.TotalBytesReceived)} down / {FormatBytes(rate.TotalBytesSent)} up)"
             : "(measuring...)");
         PrintField("Current state duration:", durationDisplay);

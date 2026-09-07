@@ -135,4 +135,67 @@ public class NetworkThroughputTrackerTests
         ThroughputSample? result = tracker.Update(50_000, 20_000, T0.AddSeconds(2));
         Assert.Null(result);
     }
+
+    [Fact]
+    public void DownloadAppearsUnsupported_IsFalse_BeforeEnoughSamplesHaveAccumulated()
+    {
+        // Confirmed against a real FortiClient tunnel adapter: BytesSent climbs
+        // normally while BytesReceived sits at a permanent 0. A handful of
+        // upload-only ticks must not immediately flip the verdict - that would
+        // misdiagnose an ordinary quiet moment on a normal adapter.
+        var tracker = new NetworkThroughputTracker();
+        tracker.Update(0, 0, T0);
+
+        for (int tick = 1; tick <= 3; tick++)
+        {
+            tracker.Update(0, tick * 1_000L, T0.AddSeconds(tick));
+        }
+
+        Assert.False(tracker.DownloadAppearsUnsupported);
+    }
+
+    [Fact]
+    public void DownloadAppearsUnsupported_IsTrue_AfterRepeatedUploadOnlySamples()
+    {
+        var tracker = new NetworkThroughputTracker();
+        tracker.Update(0, 0, T0);
+
+        for (int tick = 1; tick <= 5; tick++)
+        {
+            tracker.Update(0, tick * 1_000L, T0.AddSeconds(tick));
+        }
+
+        Assert.True(tracker.DownloadAppearsUnsupported);
+    }
+
+    [Fact]
+    public void DownloadAppearsUnsupported_StaysFalse_OnceAnyDownloadHasEverBeenObserved()
+    {
+        var tracker = new NetworkThroughputTracker();
+        tracker.Update(0, 0, T0);
+        tracker.Update(500, 1_000, T0.AddSeconds(1)); // one real download tick
+
+        for (int tick = 2; tick <= 6; tick++)
+        {
+            tracker.Update(500, tick * 1_000L, T0.AddSeconds(tick));
+        }
+
+        Assert.False(tracker.DownloadAppearsUnsupported);
+    }
+
+    [Fact]
+    public void Reset_ClearsTheUnsupportedDownloadVerdict()
+    {
+        var tracker = new NetworkThroughputTracker();
+        tracker.Update(0, 0, T0);
+        for (int tick = 1; tick <= 5; tick++)
+        {
+            tracker.Update(0, tick * 1_000L, T0.AddSeconds(tick));
+        }
+        Assert.True(tracker.DownloadAppearsUnsupported);
+
+        tracker.Reset();
+
+        Assert.False(tracker.DownloadAppearsUnsupported);
+    }
 }

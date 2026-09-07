@@ -789,12 +789,24 @@ public partial class MainForm : Form
         // a momentarily-misleading "0 B/s" on the very first tick after Start.
         if (throughput is { } rate)
         {
-            lblNetworkValue.Text = $"↓ {FormatRate(rate.DownloadBytesPerSecond)} ↑ {FormatRate(rate.UploadBytesPerSecond)}";
+            // Some VPN virtual adapters (confirmed on a real FortiClient tunnel
+            // adapter) never populate their inbound byte counter at the driver
+            // level - upload climbs normally, download sits at a permanent 0.
+            // Once the tracker has seen enough evidence of that, say so plainly
+            // rather than showing a "0 B/s" that reads as "nothing is arriving".
+            bool downloadUnsupported = _throughputTracker?.DownloadAppearsUnsupported ?? false;
+            string downloadText = downloadUnsupported ? "↓ n/a" : $"↓ {FormatRate(rate.DownloadBytesPerSecond)}";
+            lblNetworkValue.Text = $"{downloadText} ↑ {FormatRate(rate.UploadBytesPerSecond)}";
             lblNetworkExtra.Text = $"{FormatBytes(rate.TotalBytesReceived)} ↓ / {FormatBytes(rate.TotalBytesSent)} ↑ total";
-            toolTip.SetToolTip(lblNetworkValue,
-                "Live send/receive rate on the VPN adapter. \"total\" is the adapter's\n" +
-                "own cumulative counter from Windows, which may not start from zero\n" +
-                "when this monitoring session started - it is not reset by this app.");
+            toolTip.SetToolTip(lblNetworkValue, downloadUnsupported
+                ? "Live send rate on the VPN adapter. This adapter's driver never " +
+                  "reports inbound (download) byte counts - a limitation of the " +
+                  "adapter itself, not something this app can read around.\n\n" +
+                  "\"total\" is the adapter's own cumulative counter from Windows, " +
+                  "which may not start from zero when this session started."
+                : "Live send/receive rate on the VPN adapter. \"total\" is the adapter's\n" +
+                  "own cumulative counter from Windows, which may not start from zero\n" +
+                  "when this monitoring session started - it is not reset by this app.");
         }
         else
         {

@@ -635,6 +635,7 @@ public static class Program
                     dashboard.Render(
                         config, vpnStateSnapshot, internetSnapshot, processSnapshots, correlator, now,
                         throughput: throughput,
+                        downloadUnsupported: throughputTracker.DownloadAppearsUnsupported,
                         updateNotice: updateNotice);
 
                     // The dashboard clears the screen on its first render, which would wipe the

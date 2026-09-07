@@ -31,11 +31,29 @@ public sealed class NetworkThroughputTracker
     private long? _lastBytesReceived;
     private long? _lastBytesSent;
     private DateTimeOffset? _lastObservedAt;
+    private bool _everObservedDownload;
+    private int _uploadOnlySampleCount;
 
     // Below this, a rate computed from the elapsed time is not trustworthy - two
     // observations arriving unrealistically close together (a duplicate poll, a
     // clock quirk) would otherwise produce a wildly inflated or infinite rate.
     private static readonly TimeSpan MinimumInterval = TimeSpan.FromMilliseconds(250);
+
+    // How many samples of "upload moved, download did not" to require before
+    // concluding the adapter driver simply never populates the receive counter,
+    // rather than the link just being quiet in that instant. Confirmed on a real
+    // FortiClient tunnel adapter: BytesSent climbs normally while BytesReceived
+    // sits at a permanent 0 for the adapter's entire lifetime - a driver
+    // limitation of that specific virtual adapter, not a transient lull.
+    private const int UnsupportedConfirmationSamples = 5;
+
+    /// <summary>
+    /// True once enough evidence has accumulated that this adapter's driver does
+    /// not report inbound byte counts at all - upload has moved repeatedly while
+    /// download never once has. Lets the UI say so instead of showing a
+    /// permanent, misleading "0 B/s".
+    /// </summary>
+    public bool DownloadAppearsUnsupported => !_everObservedDownload && _uploadOnlySampleCount >= UnsupportedConfirmationSamples;
 
     /// <summary>
     /// Folds in one new observation. Returns null - not a zero-rate sample - when
@@ -69,6 +87,16 @@ public sealed class NetworkThroughputTracker
                     UploadBytesPerSecond: (tx - prevTx) / seconds,
                     TotalBytesReceived: rx,
                     TotalBytesSent: tx);
+
+                if (rx > prevRx)
+                {
+                    _everObservedDownload = true;
+                }
+
+                if (tx > prevTx)
+                {
+                    _uploadOnlySampleCount = rx > prevRx ? 0 : _uploadOnlySampleCount + 1;
+                }
             }
         }
 
@@ -84,5 +112,7 @@ public sealed class NetworkThroughputTracker
         _lastBytesReceived = null;
         _lastBytesSent = null;
         _lastObservedAt = null;
+        _everObservedDownload = false;
+        _uploadOnlySampleCount = 0;
     }
 }
