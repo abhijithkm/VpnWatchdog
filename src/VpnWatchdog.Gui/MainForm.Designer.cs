@@ -184,10 +184,9 @@ partial class MainForm
         headerLayout.AutoSize = true;
         headerLayout.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         headerLayout.Margin = new Padding(0);
-        headerLayout.ColumnCount = 5;
+        headerLayout.ColumnCount = 4;
         headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         headerLayout.RowCount = 2;
@@ -239,8 +238,8 @@ partial class MainForm
         btnMonitorToggle.AutoSize = true;
         btnMonitorToggle.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         btnMonitorToggle.Padding = new Padding(10, 2, 10, 2);
-        btnMonitorToggle.Margin = new Padding(6, 0, 10, 0);
-        btnMonitorToggle.Anchor = AnchorStyles.Right;
+        btnMonitorToggle.Margin = new Padding(12, 0, 0, 0);
+        btnMonitorToggle.Anchor = AnchorStyles.None;
         btnMonitorToggle.Cursor = Cursors.Hand;
         btnMonitorToggle.TabStop = false;
         toolTip.SetToolTip(btnMonitorToggle, "Start or stop monitoring the VPN");
@@ -268,9 +267,7 @@ partial class MainForm
         headerLayout.Controls.Add(lblAppSubtitle, 1, 1);
         headerLayout.Controls.Add(lblMonitoring, 2, 0);
         headerLayout.SetRowSpan(lblMonitoring, 2);
-        headerLayout.Controls.Add(btnMonitorToggle, 3, 0);
-        headerLayout.SetRowSpan(btnMonitorToggle, 2);
-        headerLayout.Controls.Add(btnSettings, 4, 0);
+        headerLayout.Controls.Add(btnSettings, 3, 0);
         headerLayout.SetRowSpan(btnSettings, 2);
 
         // ------------------------------------------------------------------
@@ -281,9 +278,10 @@ partial class MainForm
         pnlHero.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         pnlHero.Margin = new Padding(0, 8, 0, 8);
         pnlHero.Padding = new Padding(12, 8, 12, 8);
-        pnlHero.ColumnCount = 2;
+        pnlHero.ColumnCount = 3;
         pnlHero.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         pnlHero.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        pnlHero.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         pnlHero.RowCount = 3;
         pnlHero.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         pnlHero.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -337,6 +335,8 @@ partial class MainForm
         pnlHero.Controls.Add(lblHeroTitle, 1, 0);
         pnlHero.Controls.Add(lblHeroProfile, 1, 1);
         pnlHero.Controls.Add(lblHeroSub, 1, 2);
+        pnlHero.Controls.Add(btnMonitorToggle, 2, 0);
+        pnlHero.SetRowSpan(btnMonitorToggle, 3);
 
         // ------------------------------------------------------------------
         // Diagnostics + uptime / last event: caption | dot + word | right detail
