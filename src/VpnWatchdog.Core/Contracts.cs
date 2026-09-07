@@ -353,6 +353,15 @@ public enum VpnActivityKind
     ManualDisconnectRequested,
     ManualDisconnectSucceeded,
     ManualDisconnectFailed,
+
+    /// <summary>
+    /// The user clicked "Start FortiClient" from the GUI while its engine
+    /// processes were not running. Only ever records that the app itself was
+    /// launched (no elevation, same as a Start Menu shortcut) - never that the
+    /// tunnel or FortiClient's underlying Windows service came up, which this
+    /// app cannot cause without asking for admin rights.
+    /// </summary>
+    FortiClientLaunchRequested,
 }
 
 /// <summary>

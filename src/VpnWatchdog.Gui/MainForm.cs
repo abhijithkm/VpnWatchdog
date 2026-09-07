@@ -828,6 +828,60 @@ public partial class MainForm : Form
         return running.Count > 0;
     }
 
+    /// <summary>
+    /// FortiClient's own exe, derived from the configured log directory rather
+    /// than a hardcoded Program Files path - so it still resolves correctly for
+    /// anyone who pointed <see cref="WatchdogConfig.FortiClientLogDirectory"/> at
+    /// a non-default install. The log directory is always "...\FortiClient\logs\
+    /// trace", so its grandparent is the FortiClient install root. Returns null
+    /// (never throws) if that doesn't check out or the exe isn't actually there -
+    /// this is only ever used to decide whether to offer a click, not to launch
+    /// blind.
+    /// </summary>
+    private string? ResolveFortiClientExePath()
+    {
+        try
+        {
+            string? installRoot = Path.GetDirectoryName(Path.GetDirectoryName(_config.FortiClientLogDirectory));
+            if (string.IsNullOrWhiteSpace(installRoot)) return null;
+
+            string exePath = Path.Combine(installRoot, "FortiClient.exe");
+            return File.Exists(exePath) ? exePath : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Launches FortiClient's own app - exactly what a user would do from its
+    /// Start Menu shortcut, no elevation requested or required. This is
+    /// deliberately as far as it goes: FortiClient's engine processes actually
+    /// depend on a Windows SERVICE (confirmed live: launching FortiClient.exe
+    /// alone does not bring FortiVPN/FortiSSLVPNdaemon up if that service is
+    /// stopped), and starting a Windows service requires admin rights - which
+    /// this app has never asked for anywhere else and must not start here. If
+    /// that service is what's actually down, FortiClient's own UI is what tells
+    /// the user so, not this one.
+    /// </summary>
+    private void LblFortiExtra_Click(object? sender, EventArgs e)
+    {
+        string? exePath = ResolveFortiClientExePath();
+        if (exePath is null) return;
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(exePath) { UseShellExecute = true });
+            RecordActivity(VpnActivityKind.FortiClientLaunchRequested, "Launched FortiClient", exePath);
+        }
+        catch
+        {
+            // Nothing sensible to do if the shell can't launch it; not worth a
+            // MessageBox over a best-effort convenience click.
+        }
+    }
+
     // ------------------------------------------------------------------
     // Rendering
     // ------------------------------------------------------------------
@@ -887,12 +941,36 @@ public partial class MainForm : Form
         if (fortiRunning)
         {
             SetIndicator(lblFortiValue, "Running", Palette.Green);
+            lblFortiExtra.Text = runningEngines;
+            lblFortiExtra.ForeColor = Palette.Muted;
+            lblFortiExtra.Cursor = Cursors.Default;
+            toolTip.SetToolTip(lblFortiExtra, "");
         }
         else
         {
             SetIndicator(lblFortiValue, "Not running", Palette.Red);
+
+            // Only offered when FortiClient's own exe can actually be found - a
+            // clickable line that does nothing on click would be worse than none.
+            string? fortiClientExePath = ResolveFortiClientExePath();
+            if (fortiClientExePath is not null)
+            {
+                lblFortiExtra.Text = "Start FortiClient";
+                lblFortiExtra.ForeColor = Palette.Blue;
+                lblFortiExtra.Cursor = Cursors.Hand;
+                toolTip.SetToolTip(lblFortiExtra,
+                    "Launches FortiClient itself, same as its Start Menu shortcut - " +
+                    "this app never asks for admin rights, so if FortiClient's own " +
+                    "Windows service is stopped, starting that back up may need one.");
+            }
+            else
+            {
+                lblFortiExtra.Text = string.Empty;
+                lblFortiExtra.ForeColor = Palette.Muted;
+                lblFortiExtra.Cursor = Cursors.Default;
+                toolTip.SetToolTip(lblFortiExtra, "");
+            }
         }
-        lblFortiExtra.Text = runningEngines;
         toolTip.SetToolTip(lblFortiValue, DescribeProcesses(processes));
 
         // Network throughput. null (not a zero) means "not enough samples yet" -
@@ -944,6 +1022,9 @@ public partial class MainForm : Form
         SetIndicator(lblFortiValue, "Unknown", Palette.Muted, hollow: true);
         lblAdapterExtra.Text = string.Empty;
         lblFortiExtra.Text = string.Empty;
+        lblFortiExtra.ForeColor = Palette.Muted;
+        lblFortiExtra.Cursor = Cursors.Default;
+        toolTip.SetToolTip(lblFortiExtra, "");
         toolTip.SetToolTip(lblInternetValue, "Start monitoring to observe the internet connection.");
         toolTip.SetToolTip(lblAdapterValue, "Start monitoring to observe the VPN adapter.");
         toolTip.SetToolTip(lblFortiValue, "Start monitoring to observe FortiClient's processes.");

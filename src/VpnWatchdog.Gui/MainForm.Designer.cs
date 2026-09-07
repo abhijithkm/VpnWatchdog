@@ -368,6 +368,10 @@ partial class MainForm
         StyleCaption(lblFortiCaption, "FortiClient", bodyFont, captionMargin);
         StyleValue(lblFortiValue, bodyFont, rowMargin);
         StyleExtra(lblFortiExtra, smallFont, extraMargin);
+        // Cursor/tooltip toggled per-render in RenderState (only meaningful while
+        // FortiClient is confirmed not running); the click handler itself is wired
+        // once, here, and no-ops otherwise - same pattern as lblHeroSub/lblVersion.
+        lblFortiExtra.Click += LblFortiExtra_Click;
 
         StyleCaption(lblNetworkCaption, "Network", bodyFont, captionMargin);
         // Not StyleValue: that sets the "○ Unknown" dot-status convention used
