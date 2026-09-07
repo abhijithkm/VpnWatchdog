@@ -2363,8 +2363,13 @@ public partial class MainForm : Form
     // Look: palette, glyphs, rounded hero
     // ------------------------------------------------------------------
 
-    /// <summary>Windows 11 utility palette. Semantic colours match the log dialog's.</summary>
-    private static class Palette
+    /// <summary>
+    /// Windows 11 utility palette. Semantic colours match the log dialog's.
+    /// Internal, not private: RoundedControls.cs's shared controls (moved out
+    /// of this class so SettingsForm/ActivityLogForm can reuse them too) need
+    /// a default idle color before any caller has customized them.
+    /// </summary>
+    internal static class Palette
     {
         public static readonly Color Surface = Color.FromArgb(0xF9, 0xF9, 0xF9);
         public static readonly Color Border = Color.FromArgb(0xE5, 0xE5, 0xE5);
@@ -2434,74 +2439,6 @@ public partial class MainForm : Form
                 // Enumerating fonts is cosmetic; the text fallbacks are always fine.
             }
             return null;
-        }
-    }
-
-    /// <summary>
-    /// A TableLayoutPanel that paints itself as a rounded, tinted, hairline-bordered
-    /// card. Children inherit the tint through the ambient BackColor, so a state
-    /// change is one <see cref="SetTint"/> call. The corner radius is scaled with the
-    /// DPI so it stays 6 logical px everywhere.
-    /// </summary>
-    private sealed class RoundedTablePanel : TableLayoutPanel
-    {
-        private Color _edge = Palette.GreyEdge;
-
-        public RoundedTablePanel()
-        {
-            DoubleBuffered = true;
-            ResizeRedraw = true;
-            BackColor = Palette.GreyTint;
-        }
-
-        public void SetTint(Color tint, Color edge)
-        {
-            if (BackColor == tint && _edge == edge) return;
-            _edge = edge;
-            BackColor = tint;
-            Invalidate();
-        }
-
-        protected override void OnPaintBackground(PaintEventArgs e)
-        {
-            // The corners must show the surface behind the card, so that is painted
-            // first and the rounded card on top of it.
-            using (var surface = new SolidBrush(Parent?.BackColor ?? Palette.Surface))
-            {
-                e.Graphics.FillRectangle(surface, ClientRectangle);
-            }
-
-            Rectangle rect = ClientRectangle;
-            rect.Width -= 1;
-            rect.Height -= 1;
-            if (rect.Width <= 0 || rect.Height <= 0) return;
-
-            int radius = Math.Max(1, LogicalToDeviceUnits(6));
-            using GraphicsPath path = RoundedRectangle(rect, radius);
-
-            SmoothingMode previous = e.Graphics.SmoothingMode;
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var fill = new SolidBrush(BackColor))
-            {
-                e.Graphics.FillPath(fill, path);
-            }
-            using (var pen = new Pen(_edge))
-            {
-                e.Graphics.DrawPath(pen, path);
-            }
-            e.Graphics.SmoothingMode = previous;
-        }
-
-        private static GraphicsPath RoundedRectangle(Rectangle rect, int radius)
-        {
-            int d = Math.Min(radius * 2, Math.Min(rect.Width, rect.Height));
-            var path = new GraphicsPath();
-            path.AddArc(rect.X, rect.Y, d, d, 180, 90);
-            path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
-            path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
-            path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
-            path.CloseFigure();
-            return path;
         }
     }
 }

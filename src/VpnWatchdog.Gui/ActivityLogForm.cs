@@ -98,11 +98,11 @@ public sealed class ActivityLogForm : Form
     private readonly BufferedListView _list;
     private readonly ColumnHeader _colEvent;
     private readonly Label _lblEmpty;
-    private readonly Button _btnClear;
-    private readonly Button _btnRefresh;
-    private readonly Button _btnCopy;
-    private readonly Button _btnExport;
-    private readonly Button _btnClose;
+    private readonly RoundedButton _btnClear;
+    private readonly RoundedButton _btnRefresh;
+    private readonly RoundedButton _btnCopy;
+    private readonly RoundedButton _btnExport;
+    private readonly RoundedButton _btnClose;
     private readonly ToolTip _toolTip;
 
     public ActivityLogForm(IVpnActivityLog log, string profileName)
@@ -865,9 +865,9 @@ public sealed class ActivityLogForm : Form
     // Construction helpers
     // ------------------------------------------------------------------
 
-    private static Button CreateButton(string text)
+    private static RoundedButton CreateButton(string text)
     {
-        var button = new Button
+        var button = new RoundedButton
         {
             Text = text,
             AutoSize = true,

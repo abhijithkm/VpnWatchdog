@@ -46,8 +46,8 @@ public sealed class SettingsForm : Form
 
     private readonly Label lblValidation = new();
     private readonly LinkLabel lnkAbout = new();
-    private readonly Button btnOk = new();
-    private readonly Button btnCancel = new();
+    private readonly RoundedButton btnOk = new();
+    private readonly RoundedButton btnCancel = new();
 
     private GuiSettings _result;
 

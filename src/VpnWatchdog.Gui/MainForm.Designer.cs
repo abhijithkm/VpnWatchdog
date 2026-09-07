@@ -23,8 +23,8 @@ partial class MainForm
     private Label lblAppTitle;
     private Label lblAppSubtitle;
     private Label lblMonitoring;
-    private Button btnMonitorToggle;
-    private Button btnSettings;
+    private RoundedButton btnMonitorToggle;
+    private RoundedButton btnSettings;
 
     // Hero status
     private RoundedTablePanel pnlHero;
@@ -63,8 +63,8 @@ partial class MainForm
     // Actions
     private TableLayoutPanel actionLayout;
     private Panel pnlAction;
-    private Button btnAction;
-    private Button btnViewLogs;
+    private RoundedButton btnAction;
+    private RoundedButton btnViewLogs;
 
     // Footer
     private Panel sepFooter;
@@ -101,8 +101,8 @@ partial class MainForm
         lblAppTitle = new Label();
         lblAppSubtitle = new Label();
         lblMonitoring = new Label();
-        btnMonitorToggle = new Button();
-        btnSettings = new Button();
+        btnMonitorToggle = new RoundedButton();
+        btnSettings = new RoundedButton();
         pnlHero = new RoundedTablePanel();
         lblHeroGlyph = new Label();
         lblHeroTitle = new Label();
@@ -133,8 +133,8 @@ partial class MainForm
         lblAutoReconnectHint = new Label();
         actionLayout = new TableLayoutPanel();
         pnlAction = new Panel();
-        btnAction = new Button();
-        btnViewLogs = new Button();
+        btnAction = new RoundedButton();
+        btnViewLogs = new RoundedButton();
         sepFooter = MakeSeparator();
         footerLayout = new TableLayoutPanel();
         lblMode = new Label();
