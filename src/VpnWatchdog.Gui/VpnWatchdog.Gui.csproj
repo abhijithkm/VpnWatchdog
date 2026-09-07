@@ -10,7 +10,7 @@
     <!-- Bump this on every tagged release - VersionText() and the update checker
          both read it straight off the assembly, and it must match the git tag
          (e.g. v1.0.3 here <-> tag v1.0.3) for either to mean anything. -->
-    <Version>1.0.5</Version>
+    <Version>1.0.6</Version>
     <ApplicationVisualStyles>true</ApplicationVisualStyles>
     <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
     <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
