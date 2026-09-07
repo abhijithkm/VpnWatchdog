@@ -6,6 +6,7 @@ using VpnWatchdog.Core.Logging;
 using VpnWatchdog.Core.Providers;
 using VpnWatchdog.Core.Reconnect;
 using VpnWatchdog.Core.Storage;
+using VpnWatchdog.Core.Updates;
 
 namespace VpnWatchdog.Cli;
 
@@ -184,6 +185,30 @@ public static class Program
             cts.Cancel();
         };
         CancellationToken ct = cts.Token;
+
+        // One anonymous, unauthenticated check against GitHub's public release API,
+        // fired once and forgotten - never awaited, never allowed to delay startup or
+        // the poll loop, and its own checker guarantees it can never throw. The result
+        // (if any) surfaces as one more line on the dashboard once it resolves; there
+        // is nothing to show while it is still in flight or if it fails.
+        string? updateNotice = null;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var updateChecker = new GitHubUpdateChecker();
+                Version currentVersion = typeof(Program).Assembly.GetName().Version ?? new Version(0, 0, 0);
+                UpdateCheckResult result = await updateChecker.CheckForUpdateAsync(currentVersion, ct).ConfigureAwait(false);
+                if (result.Outcome == UpdateCheckOutcome.UpdateAvailable)
+                {
+                    updateNotice = $"A newer version ({result.LatestVersionTag}) is available: {result.ReleaseUrl}";
+                }
+            }
+            catch
+            {
+                // A background version check must never take down the monitor.
+            }
+        }, ct);
 
         Console.WriteLine(config.AutoReconnectEnabled
             ? "VPN Watchdog starting - monitoring with AUTO-RECONNECT. Press Ctrl+C to stop."
@@ -600,7 +625,7 @@ public static class Program
                         }
                     }
 
-                    dashboard.Render(config, vpnStateSnapshot, internetSnapshot, processSnapshots, correlator, now);
+                    dashboard.Render(config, vpnStateSnapshot, internetSnapshot, processSnapshots, correlator, now, updateNotice);
 
                     // The dashboard clears the screen on its first render, which would wipe the
                     // startup banner within a couple of seconds; restate the one-line mode

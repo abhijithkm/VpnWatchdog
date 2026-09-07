@@ -232,6 +232,19 @@ None of these ever contain a credential — there is no field in the data model 
 
 ---
 
+## Update checking
+
+Both apps make one anonymous, unauthenticated GET against GitHub's public release API on startup (GUI: also every 6 hours after, for a session that stays open for days), comparing the running assembly's version against the latest tagged release. If a newer version exists:
+
+- **GUI**: the footer version text turns blue and clickable — e.g. `v1.0.3 → v1.0.4 available` — and opens the release page in your browser.
+- **CLI**: one line appears on the dashboard naming the version and a link.
+
+If the check fails for any reason (no internet, GitHub unreachable, rate-limited) or the app is already current, nothing is shown — this is a background nicety with a strict 4-second timeout, and it can never block startup, delay the poll loop, or surface as an error.
+
+It never downloads or installs anything automatically — the "which .exe do I need" call is `VpnWatchdogGui.exe` for the desktop app and `VpnWatchdog-cli.exe` for the console version.
+
+---
+
 ## Testing
 
 ```

@@ -76,6 +76,10 @@ partial class MainForm
     private ToolStripMenuItem trayMenuShow;
     private ToolStripMenuItem trayMenuExit;
     private System.Windows.Forms.Timer pollTimer;
+    // Deliberately separate from pollTimer: update-checking has nothing to do
+    // with VPN monitoring and must keep working (and keep re-checking) whether
+    // Start/Stop is on or off - see MainForm.cs's BeginUpdateCheck.
+    private System.Windows.Forms.Timer updateCheckTimer;
 
     private void InitializeComponent()
     {
@@ -86,6 +90,7 @@ partial class MainForm
         trayMenuExit = new ToolStripMenuItem();
         trayIcon = new NotifyIcon(components);
         pollTimer = new System.Windows.Forms.Timer(components);
+        updateCheckTimer = new System.Windows.Forms.Timer(components);
 
         rootLayout = new TableLayoutPanel();
         headerLayout = new TableLayoutPanel();
@@ -530,6 +535,10 @@ partial class MainForm
         lblVersion.AutoSize = true;
         lblVersion.Anchor = AnchorStyles.Right;
         lblVersion.Margin = new Padding(0);
+        // Cursor/tooltip toggle per-render in RenderVersionLabel (only meaningful
+        // once an update is known to be available); the click handler is wired
+        // once, here, and no-ops otherwise.
+        lblVersion.Click += LblVersion_Click;
 
         footerLayout.Controls.Add(lblMode, 0, 0);
         footerLayout.Controls.Add(lblModeInfo, 1, 0);
@@ -566,6 +575,10 @@ partial class MainForm
 
         pollTimer.Interval = 2000;
         pollTimer.Tick += PollTimer_Tick;
+        // Re-check cadence for a GUI that may stay open for days; the first,
+        // immediate check happens separately, from the constructor.
+        updateCheckTimer.Interval = (int)TimeSpan.FromHours(6).TotalMilliseconds;
+        updateCheckTimer.Tick += UpdateCheckTimer_Tick;
 
         // Form
         AutoScaleDimensions = new SizeF(96F, 96F);

@@ -8,6 +8,10 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>VpnWatchdog.Cli</RootNamespace>
     <AssemblyName>VpnWatchdog</AssemblyName>
+    <!-- Bump this on every tagged release - the update checker reads it straight
+         off the assembly, and it must match the git tag (e.g. v1.0.3 here <-> tag
+         v1.0.3) for the comparison to mean anything. -->
+    <Version>1.0.3</Version>
   </PropertyGroup>
 
   <ItemGroup>

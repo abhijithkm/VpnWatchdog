@@ -17,13 +17,21 @@ public sealed class ConsoleDashboard
     private string? _lastRenderedSignature;
     private DateTimeOffset _lastRenderTime = DateTimeOffset.MinValue;
 
+    /// <param name="updateNotice">
+    /// A one-line "a newer version is available" notice (already fully worded, URL
+    /// included), or null if none is known yet / the running version is current.
+    /// Passed in rather than checked here - the dashboard has no business making
+    /// network calls, and the check may still be in flight on the very first
+    /// frames.
+    /// </param>
     public void Render(
         WatchdogConfig config,
         VpnStateSnapshot vpnState,
         InternetSnapshot internet,
         IReadOnlyList<ProcessSnapshot> processes,
         IVpnEventCorrelator correlator,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        string? updateNotice = null)
     {
         IReadOnlyList<DisconnectCorrelation> completed = correlator.GetCompletedCorrelations();
         DisconnectCorrelation? open = correlator.GetOpenCorrelation();
@@ -58,7 +66,8 @@ public sealed class ConsoleDashboard
             sslVpnDaemonRunning,
             unexpectedDisconnects,
             automaticRecoveries,
-            failedRecoveries);
+            failedRecoveries,
+            updateNotice);
 
         bool isFirstRender = _lastRenderedSignature is null;
         bool contentChanged = signature != _lastRenderedSignature;
@@ -112,6 +121,11 @@ public sealed class ConsoleDashboard
             : "Mode: OBSERVE ONLY -- this run will not connect or modify the VPN.");
         Console.WriteLine("      It never disconnects the VPN and never handles credentials.");
         Console.WriteLine(bar);
+
+        if (!string.IsNullOrEmpty(updateNotice))
+        {
+            Console.WriteLine(updateNotice);
+        }
     }
 
     private static void PrintField(string label, string value)

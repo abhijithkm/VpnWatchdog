@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using VpnWatchdog.Core;
@@ -6,6 +7,7 @@ using VpnWatchdog.Core.Logging;
 using VpnWatchdog.Core.Providers;
 using VpnWatchdog.Core.Reconnect;
 using VpnWatchdog.Core.Storage;
+using VpnWatchdog.Core.Updates;
 
 namespace VpnWatchdog.Gui;
 
@@ -125,6 +127,14 @@ public partial class MainForm : Form
     private bool _suppressCheckboxEvents;
     private bool _exitRequested;
 
+    // Set by BeginUpdateCheck; read only by RenderVersionLabel and
+    // LblVersion_Click. Independent of monitoring/VPN state entirely - this is
+    // "is a newer release of this app itself available", nothing to do with the
+    // tunnel.
+    private string? _updateAvailableVersionTag;
+    private string? _updateReleaseUrl;
+    private bool _updateCheckInFlight;
+
     /// <summary>
     /// The base config with the live checkbox state folded in. AutoReconnectEnabled
     /// is a record property, so the only way to change it is to build a new record.
@@ -149,9 +159,16 @@ public partial class MainForm : Form
         // and MonitoringStarted already says which mode the session began in.
         SyncAutoReconnectCheckbox(recordChange: false);
 
-        lblVersion.Text = VersionText();
+        RenderVersionLabel();
         RenderIdle();
         RenderActionButton();
+
+        // Independent of Start/Stop and of StartMonitoringOnLaunch: this has
+        // nothing to do with VPN monitoring, so it always runs. One check now,
+        // then updateCheckTimer re-checks periodically for a session that stays
+        // open for days.
+        BeginUpdateCheck();
+        updateCheckTimer.Start();
     }
 
     /// <summary>
@@ -957,6 +974,100 @@ public partial class MainForm : Form
     {
         Version? version = typeof(MainForm).Assembly.GetName().Version;
         return version is null ? "v1.0.0" : $"v{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}";
+    }
+
+    // ------------------------------------------------------------------
+    // Update check - entirely independent of VPN monitoring/state. A single
+    // anonymous GET against GitHub's public release API; see
+    // VpnWatchdog.Core.Updates.GitHubUpdateChecker for the guarantee that this
+    // can never throw and never blocks noticeably.
+    // ------------------------------------------------------------------
+
+    private void UpdateCheckTimer_Tick(object? sender, EventArgs e) => BeginUpdateCheck();
+
+    private void BeginUpdateCheck()
+    {
+        // One at a time: the periodic timer and the constructor's initial call
+        // could otherwise overlap on a slow network.
+        if (_updateCheckInFlight) return;
+        _updateCheckInFlight = true;
+
+        _ = Task.Run(async () =>
+        {
+            string? tag = null;
+            string? url = null;
+            try
+            {
+                using var checker = new GitHubUpdateChecker();
+                Version current = typeof(MainForm).Assembly.GetName().Version ?? new Version(0, 0, 0);
+                UpdateCheckResult result = await checker.CheckForUpdateAsync(current, CancellationToken.None).ConfigureAwait(false);
+                if (result.Outcome == UpdateCheckOutcome.UpdateAvailable)
+                {
+                    tag = result.LatestVersionTag;
+                    url = result.ReleaseUrl;
+                }
+            }
+            catch
+            {
+                // A background version check must never crash the form.
+            }
+            finally
+            {
+                RunOnUiThread(() =>
+                {
+                    _updateCheckInFlight = false;
+
+                    // Only a genuine change is worth a repaint - the far more common
+                    // case, "still up to date", must stay a total no-op.
+                    if (_updateAvailableVersionTag != tag || _updateReleaseUrl != url)
+                    {
+                        _updateAvailableVersionTag = tag;
+                        _updateReleaseUrl = url;
+                        RenderVersionLabel();
+                    }
+                });
+            }
+        });
+    }
+
+    /// <summary>
+    /// Ordinary muted version text, unless an update is known to be available, in
+    /// which case it becomes a clickable accent-coloured line naming the newer
+    /// version - reusing the exact "colour + hand cursor + tooltip + click"
+    /// pattern the profile-mismatch nudge on the hero uses, for the same reason:
+    /// a plain-text label that happens to be clickable is not a control anyone
+    /// would think to click.
+    /// </summary>
+    private void RenderVersionLabel()
+    {
+        bool hasUpdate = _updateAvailableVersionTag is not null && _updateReleaseUrl is not null;
+
+        lblVersion.Text = hasUpdate
+            ? $"{VersionText()} → {_updateAvailableVersionTag} available"
+            : VersionText();
+        lblVersion.ForeColor = hasUpdate ? Palette.Blue : Palette.Muted;
+        lblVersion.Cursor = hasUpdate ? Cursors.Hand : Cursors.Default;
+        toolTip.SetToolTip(lblVersion, hasUpdate
+            ? "A newer version is available - click to open the release page"
+            : "");
+    }
+
+    private void LblVersion_Click(object? sender, EventArgs e)
+    {
+        if (_updateReleaseUrl is not { Length: > 0 } url) return;
+
+        try
+        {
+            // UseShellExecute: this is a browser URL, not an executable - letting
+            // Windows hand it to whatever the user's default browser is, exactly
+            // like clicking a link anywhere else.
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch
+        {
+            // Nothing sensible to do if the shell can't open a URL; definitely
+            // not worth a MessageBox over.
+        }
     }
 
     // ------------------------------------------------------------------
