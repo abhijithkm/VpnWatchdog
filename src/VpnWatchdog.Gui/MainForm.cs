@@ -1109,7 +1109,9 @@ public partial class MainForm : Form
     /// version - reusing the exact "colour + hand cursor + tooltip + click"
     /// pattern the profile-mismatch nudge on the hero uses, for the same reason:
     /// a plain-text label that happens to be clickable is not a control anyone
-    /// would think to click.
+    /// would think to click. The label is always clickable though: with no update
+    /// it still opens the About dialog, so the hand cursor/tooltip just change to
+    /// match what a click will do.
     /// </summary>
     private void RenderVersionLabel()
     {
@@ -1119,28 +1121,33 @@ public partial class MainForm : Form
             ? $"{VersionText()} → {_updateAvailableVersionTag} available"
             : VersionText();
         lblVersion.ForeColor = hasUpdate ? Palette.Blue : Palette.Muted;
-        lblVersion.Cursor = hasUpdate ? Cursors.Hand : Cursors.Default;
+        lblVersion.Cursor = Cursors.Hand;
         toolTip.SetToolTip(lblVersion, hasUpdate
             ? "A newer version is available - click to open the release page"
-            : "");
+            : "Click for details about VPN Watchdog");
     }
 
     private void LblVersion_Click(object? sender, EventArgs e)
     {
-        if (_updateReleaseUrl is not { Length: > 0 } url) return;
+        if (_updateReleaseUrl is { Length: > 0 } url)
+        {
+            try
+            {
+                // UseShellExecute: this is a browser URL, not an executable - letting
+                // Windows hand it to whatever the user's default browser is, exactly
+                // like clicking a link anywhere else.
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            catch
+            {
+                // Nothing sensible to do if the shell can't open a URL; definitely
+                // not worth a MessageBox over.
+            }
+            return;
+        }
 
-        try
-        {
-            // UseShellExecute: this is a browser URL, not an executable - letting
-            // Windows hand it to whatever the user's default browser is, exactly
-            // like clicking a link anywhere else.
-            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-        }
-        catch
-        {
-            // Nothing sensible to do if the shell can't open a URL; definitely
-            // not worth a MessageBox over.
-        }
+        using AboutForm about = new();
+        about.ShowDialog(this);
     }
 
     // ------------------------------------------------------------------
@@ -2022,6 +2029,22 @@ public partial class MainForm : Form
     // ------------------------------------------------------------------
     // Tray / lifetime
     // ------------------------------------------------------------------
+
+    // Registered once per machine session, not per instance: this is exactly
+    // what lets a second launch's Program.Main reach this instance's WndProc
+    // without either one knowing the other's window handle up front.
+    internal static readonly int ShowExistingInstanceMessage =
+        NativeMethods.RegisterWindowMessage("WM_SHOWFIRSTINSTANCE_VPNWATCHDOG");
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == ShowExistingInstanceMessage)
+        {
+            RestoreFromTray();
+        }
+
+        base.WndProc(ref m);
+    }
 
     private void MainForm_Resize(object? sender, EventArgs e)
     {

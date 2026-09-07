@@ -189,7 +189,9 @@ A single compact window (≈400×450px, resizable-free by design — it's meant 
 - **Connect/Disconnect** — a single contextual button (never both at once) that reflects the tunnel's actual current state. Disconnect asks for confirmation (default: No) and disarms auto-reconnect first.
 - **View Logs** — opens the shared activity log in a filterable, exportable list (All events / VPN only / Reconnects / Warnings & errors), with Copy, Export (.txt/.csv), and a confirmed Clear Logs.
 - **Settings (gear icon)** — profile name, poll interval, start-on-launch, minimize-to-tray, and all five reconnect tuning numbers; edits a private copy, only applies on OK. Includes a link to **About**.
+- **Version label (bottom right)** — always clickable: opens the GitHub release page if a newer version is available, otherwise opens the **About** dialog.
 - **Tray icon** — minimizing (or closing, if "Minimize to tray on close" is checked) hides to the system tray rather than exiting; double-click or the tray menu's Show restores it.
+- **Single instance** — launching the GUI while it's already running (even minimized to tray) just brings the existing window to the front instead of starting a second monitoring loop and a second tray icon.
 
 GUI preferences persist to **`%LOCALAPPDATA%\VpnWatchdog\gui-settings.json`**. The GUI uses its own evidence database (`vpn-watchdog-gui.db`, distinct from the CLI's `vpn-watchdog.db`, so the two can run simultaneously without contention) but shares the same activity-log file as the CLI.
 
